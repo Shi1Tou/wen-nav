@@ -1,0 +1,29 @@
+{
+  "name": "navbox",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NavBox - 可自定义的个人网址导航，基于 EdgeOne Pages(Makers) + KV 存储",
+  "type": "module",
+  "scripts": {
+    "mock": "node dev-server.mjs",
+    "mock:reset": "node scripts/reset-local-kv.mjs",
+    "test": "node scripts/smoke-test.mjs",
+    "deploy": "edgeone makers deploy -n navbox",
+    "deploy:preview": "edgeone makers deploy -n navbox -e preview"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "navigation",
+    "bookmark",
+    "nav",
+    "edgeone",
+    "pages",
+    "makers",
+    "kv",
+    "serverless",
+    "webdav"
+  ],
+  "license": "MIT"
+}

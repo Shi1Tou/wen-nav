@@ -1,0 +1,38 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 本地调试产生的 KV 模拟数据（含管理员口令哈希，切勿提交）
+.navbox-local/
+*.local.json
+dev-kv.json
+.env
+.env.*
+!.env.example
+
+# 构建产物
+dist/
+build/
+.output/
+.edgeone/
+
+# 交付/备份压缩包
+*.zip
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
