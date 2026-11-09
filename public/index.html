@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#4f7cff">
+<meta name="description" content="NavBox - 简洁快速的个人网址导航，支持分组、搜索、公开与私密书签">
+<meta name="referrer" content="no-referrer">
+<title>NavBox 导航</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f7cff'/%3E%3Ctext x='16' y='23' font-size='18' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/nav.css">
+<link rel="stylesheet" href="/assets/admin.css">
+</head>
+<body class="theme-auto">
+
+<div class="bg-layer" id="bgLayer"></div>
+<div class="bg-overlay" id="bgOverlay"></div>
+
+<!-- 顶栏 -->
+<header class="topbar">
+  <div class="brand">
+    <span class="logo-dot">N</span>
+    <span class="brand-text" id="brandText">NavBox 导航</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="search-wrap" id="searchWrap">
+    <input class="search-input" id="searchInput" type="search" autocomplete="off"
+           spellcheck="false" placeholder="搜索书签…" aria-label="搜索书签">
+    <span class="search-ico">🔍</span>
+    <button class="search-clear" id="searchClear" type="button" aria-label="清空搜索">✕</button>
+  </div>
+
+  <button class="icon-btn" id="themeBtn" type="button" title="切换明暗模式" aria-label="切换明暗模式">◐</button>
+  <button class="icon-btn" id="adminBtn" type="button" title="管理后台" aria-label="管理后台">⚙</button>
+</header>
+
+<!-- 主体 -->
+<main class="container">
+  <section class="hero" id="hero">
+    <h1 id="heroTitle">NavBox 导航</h1>
+    <p id="heroSubtitle">简洁、快速、可自定义的个人网址导航</p>
+    <div class="hero-clock" id="heroClock"></div>
+  </section>
+
+  <div id="errHost"></div>
+  <div id="content">
+    <div class="loading-box"><div class="spinner"></div><div>正在加载书签…</div></div>
+  </div>
+</main>
+
+<footer class="footer" id="footer"></footer>
+
+<!-- 管理后台弹层 -->
+<div class="modal-mask" id="adminMask" hidden>
+  <div class="modal-panel admin-panel" role="dialog" aria-modal="true" aria-label="管理后台">
+    <div class="admin-head">
+      <div class="admin-title">
+        <span class="admin-title-ico">⚙</span>
+        <span id="adminHeadText">管理后台</span>
+      </div>
+      <button class="icon-btn admin-close" id="adminClose" type="button" aria-label="关闭">✕</button>
+    </div>
+    <div class="admin-body" id="adminBody"></div>
+  </div>
+</div>
+
+<div class="toast-host" id="toastHost"></div>
+
+<script src="/assets/nav.js"></script>
+<script src="/assets/admin.js"></script>
+</body>
+</html>
