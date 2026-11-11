@@ -159,10 +159,15 @@ const server = createServer(async (req, res) => {
   });
 
   if (pathname.startsWith('/api/')) {
+    // KV_MODE=global 时按官方模板形态把绑定注入全局作用域（env 留空），
+    // 用于验证后端对两种注入方式的兼容性。
+    const globalMode = String(process.env.KV_MODE || 'env').toLowerCase() === 'global';
+    if (globalMode && !globalThis.NAV_KV) globalThis.NAV_KV = mockKV;
+    if (!globalMode && globalThis.NAV_KV) delete globalThis.NAV_KV;
     const context = {
       request,
       params: {},
-      env: { NAV_KV: mockKV },   // 模拟控制台绑定的命名空间变量名
+      env: globalMode ? {} : { NAV_KV: mockKV },   // 模拟控制台绑定的命名空间变量名
       waitUntil: p => { Promise.resolve(p).catch(e => console.error('[dev] waitUntil 任务失败：', e.message)); }
     };
     try {

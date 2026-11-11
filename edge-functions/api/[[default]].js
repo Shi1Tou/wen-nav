@@ -20,25 +20,54 @@ const DEFAULT_ADMIN = { username: 'admin', password: 'admin123' };
  * KV 命名空间解析
  * ------------------------------------------------------------------ */
 
-/**
- * 兼容不同的绑定变量名：优先 NAV_KV，其次扫描 env 中任何具备 KV 接口的对象。
- * 这样无论用户在控制台把命名空间绑定成什么变量名都能工作。
- */
-function resolveKV(env) {
-  if (!env) return null;
-  const preferred = ['NAV_KV', 'NAVBOX_KV', 'BOOKMARK_KV', 'my_kv', 'KV'];
-  for (const name of preferred) {
-    const ns = env[name];
-    if (ns && typeof ns.get === 'function' && typeof ns.put === 'function') return ns;
+// 边缘运行时的全局对象。官方 KV 模板示例直接使用裸全局变量 my_kv 读写，
+// 说明 Makers 可能把绑定注入函数全局作用域，而不一定挂在 context.env 上。
+const GLOBAL_SCOPE = (typeof globalThis !== 'undefined' && globalThis) || {};
+
+const PREF_NAMES = ['NAV_KV', 'NAVBOX_KV', 'BOOKMARK_KV', 'my_kv', 'KV'];
+
+function hasKVShape(v) {
+  return !!v && typeof v === 'object'
+    && typeof v.get === 'function' && typeof v.put === 'function'
+    && typeof v.delete === 'function' && typeof v.list === 'function';
+}
+
+// 在指定对象中查找具备 KV 接口的绑定：先按优先名匹配，再全量扫描
+function scanObject(obj, source) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const name of PREF_NAMES) {
+    if (hasKVShape(obj[name])) return { kv: obj[name], source: source + ':' + name };
   }
-  for (const key of Object.keys(env)) {
-    const ns = env[key];
-    if (ns && typeof ns.get === 'function' && typeof ns.put === 'function'
-        && typeof ns.delete === 'function' && typeof ns.list === 'function') {
-      return ns;
-    }
+  let keys;
+  try { keys = Object.keys(obj); } catch (e) { keys = []; }
+  for (const key of keys) {
+    if (PREF_NAMES.indexOf(key) > -1) continue;
+    if (hasKVShape(obj[key])) return { kv: obj[key], source: source + ':' + key };
   }
   return null;
+}
+
+// 仅用于诊断接口：安全地列出对象键名，任何异常都不抛出
+function safeKeys(obj) {
+  try {
+    if (!obj || typeof obj !== 'object') return [];
+    return Object.keys(obj).slice(0, 60);
+  } catch (e) { return []; }
+}
+
+/**
+ * 查找平台绑定的 KV 命名空间。
+ * 按优先级搜索多个注入位置，兼容不同运行时形态：
+ *   1. context.env（常规方式）
+ *   2. 全局作用域（globalThis / self，官方模板的用法）
+ *   3. context 自身属性
+ */
+function resolveKV(context) {
+  const c = context || {};
+  return scanObject(c.env, 'env')
+    || scanObject(GLOBAL_SCOPE, 'global')
+    || scanObject(c, 'context')
+    || { kv: null, source: null };
 }
 
 /* ------------------------------------------------------------------ *
@@ -869,8 +898,10 @@ function htmlResponse(text, filename) {
  * ------------------------------------------------------------------ */
 
 async function handle(path, method, request, context) {
-  const { env, waitUntil } = context;
-  const kv = resolveKV(env);
+  const { waitUntil } = context;
+  const resolved = resolveKV(context);
+  const kv = resolved.kv;
+  const kvSource = resolved.source;
 
   const corsOrigin = request.headers.get('Origin');
   const corsHeaders = {};
@@ -880,11 +911,33 @@ async function handle(path, method, request, context) {
     corsHeaders['Vary'] = 'Origin';
   }
 
+  // 诊断接口：无需 KV 即可访问，用于排查绑定未生效的问题
+  if (path === '/api/debug/env' && method === 'GET') {
+    return new Response(JSON.stringify({
+      ok: true,
+      kvBound: !!kv,
+      kvSource: kvSource,
+      envKeys: safeKeys(context.env),
+      contextKeys: safeKeys(context),
+      globalKeys: safeKeys(GLOBAL_SCOPE).filter(function (k) {
+        return ['NAV_KV', 'NAVBOX_KV', 'BOOKMARK_KV', 'my_kv', 'KV'].indexOf(k) > -1
+          || hasKVShape(GLOBAL_SCOPE[k]);
+      }),
+      hint: kv
+        ? '已找到 KV 绑定，来源见 kvSource'
+        : '未在任何位置找到 KV 绑定。请确认：1) 已在控制台为该项目绑定命名空间；2) 绑定后已重新部署（绑定不会热生效到旧部署）。',
+      time: nowIso()
+    }, null, 2), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...corsHeaders }
+    });
+  }
+
   if (!kv) {
     return new Response(JSON.stringify({
       ok: false,
       error: 'KV_NOT_BOUND',
-      message: '未检测到已绑定的 KV 命名空间。请在 EdgeOne(Makers) 控制台 → 项目 → KV 存储 → 绑定命名空间，变量名建议填写 NAV_KV。'
+      message: '未检测到已绑定的 KV 命名空间。请在 EdgeOne(Makers) 控制台 → 项目 → KV 存储 → 绑定命名空间，变量名建议填写 NAV_KV；绑定后必须重新部署。可访问 /api/debug/env 查看运行时实际看到的键名。'
     }), { status: 503, headers: { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders } });
   }
 
