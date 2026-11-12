@@ -79,7 +79,8 @@
 │   └── api/
 │       └── [[default]].js       # 全部后端 API（Edge Function）
 ├── scripts/
-│   ├── smoke-test.mjs           # 接口测试（145 项断言）
+│   ├── smoke-test.mjs           # 接口测试（158 项断言）
+│   ├── login-flow-test.mjs      # 登录流程回归测试（jsdom 驱动真实前端代码）
 │   └── reset-local-kv.mjs       # 重置本地调试数据
 ├── .github/workflows/deploy.yml # GitHub Actions 自动部署（可选）
 ├── dev-server.mjs               # 本地调试服务器（模拟 KV）
@@ -296,7 +297,9 @@ edgeone makers dev    # 默认 http://localhost:8088
 
 ## 测试
 
-`scripts/smoke-test.mjs` 覆盖 **145 项断言**，全部通过：
+### 接口测试
+
+`scripts/smoke-test.mjs` 覆盖 **158 项断言**，全部通过：
 
 | 模块 | 覆盖内容 |
 |---|---|
@@ -311,11 +314,10 @@ edgeone makers dev    # 默认 http://localhost:8088
 | 导入 | JSON 合并去重、分组映射、私密属性保留、HTML 解析（H3 分组/ICON/PRIVATE）、损坏 JSON 400、覆盖模式 |
 | WebDAV | 非 http(s) 拒绝、保存不回显密码、留空保持原密码、不可达主机优雅失败并记日志、cron 令牌校验(403) |
 | 安全边界 | 未登录 401、篡改令牌 401、GET 访问 POST 接口 405、未知路由 404、非法 JSON 400 |
-| 账号修改 | 当前密码错误 403、过短密码/用户名 400、改名不影响会话、改密使旧会话失效、旧凭据登录失败、还原后可用默认账号登录 |
+| 账号修改 | 当前密码错误 403、过短密码/用户名 400、改名不影响会话、改密使旧会话失效、旧凭据登录失败、**登录后连续 6 轮 check+data 会话保持稳定**、签名密钥不外泄、还原后可用默认账号登录 |
 | 登出 | 登出后管理接口 401、前台仍可访问公开数据、私密书签不再返回 |
 | 静态资源 | 首页与四个资源文件可访问且非空、viewport 已设置 |
-
-运行方式：
+| 登录态回归 | 静态断言修复点：登录先同步状态再刷新入口、401 清理状态、并发守卫、密钥内联存储 |
 
 ```bash
 # 终端 1
@@ -323,6 +325,24 @@ npm run mock
 # 终端 2
 npm test
 ```
+
+### 登录流程回归测试（可选）
+
+`scripts/login-flow-test.mjs` 用 jsdom 加载**真实的 nav.js + admin.js**，完整跑一遍「打开后台 → 登录 → 等待数据往返」，专门覆盖接口测试抓不到的前端状态竞态（即"登录后约 3 秒被踢回登录页"缺陷）。它会自动构造**修复前的对照版本**与**当前修复版本**对比：
+
+- 对照组：登录成功后被踢回登录页（复现缺陷）
+- 修复组：等待数据往返后仍稳定停留在后台，书签正常渲染
+
+```bash
+npm install jsdom --no-save     # 一次性安装（不会写入 package.json）
+# 终端 1
+npm run mock
+# 终端 2
+node scripts/login-flow-test.mjs
+# 可选：LATENCY=2000 放大网络延迟，模拟更慢的边缘节点往返
+```
+
+> jsdom 是可选依赖，未安装时该测试自动跳过，不影响 `npm test`。
 
 ---
 

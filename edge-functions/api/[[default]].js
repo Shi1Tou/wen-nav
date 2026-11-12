@@ -226,12 +226,35 @@ async function hashPassword(password, saltHex, iterations = PBKDF2_ITERATIONS) {
   return bytesToHex(bits);
 }
 
-async function getSecret(kv) {
-  let secret = await kv.get(K.secret);
-  if (typeof secret !== 'string' || secret.length < 32) {
-    secret = randomHex(32);
-    await kv.put(K.secret, secret);
+/**
+ * 会话签名密钥：内联存储在 navbox_admin 记录中（signSecret 字段）。
+ *
+ * 为什么不用独立的 navbox_secret 键：
+ * KV 是多边缘节点最终一致存储（最长 60s），独立键可能出现「登录在节点 A 写入密钥，
+ * 后续请求落在节点 B 暂时读不到 → getSecret 重新生成并覆盖 → 所有已签发令牌验签失败」
+ * 的竞态，表现为登录后几秒突然被踢回登录页。
+ * 并入 admin 记录后，密钥与 tokenVersion 同条读写、天然原子一致。
+ *
+ * 兼容旧数据：若 admin 记录没有 signSecret，优先迁移独立键 navbox_secret 的值，
+ * 迁移不到才生成新密钥（生成新密钥会使旧会话失效，属一次性代价）。
+ */
+async function getSecret(admin, kv) {
+  if (admin && typeof admin.signSecret === 'string' && admin.signSecret.length >= 32) {
+    return hexToBytes(admin.signSecret);
   }
+  // 迁移旧版独立密钥键
+  let secret = null;
+  try {
+    const legacy = await kv.get(K.secret);
+    if (typeof legacy === 'string' && legacy.length >= 32) secret = legacy;
+  } catch (e) { /* 忽略读取失败 */ }
+  if (!secret) secret = randomHex(32);
+  if (admin) {
+    admin.signSecret = secret;
+    await writeJSON(kv, K.admin, admin);
+  }
+  // 旧独立键不再使用，尽力清理（失败不影响功能）
+  try { await kv.delete(K.secret); } catch (e) { /* 忽略 */ }
   return hexToBytes(secret);
 }
 
@@ -449,7 +472,7 @@ async function getAuth(request, kv) {
   if (!admin) return { admin: false };
   const token = parseCookies(request)[COOKIE_NAME];
   if (!token) return { admin: false };
-  const secretBytes = await getSecret(kv);
+  const secretBytes = await getSecret(admin, kv);
   const payload = await verifyToken(token, secretBytes);
   if (!payload) return { admin: false };
   if (payload.v !== admin.tokenVersion) return { admin: false };
@@ -1022,7 +1045,7 @@ async function handle(path, method, request, context) {
           return withCors(err('用户名或密码错误', 401));
         }
         await recordLoginFail(kv, ip, true);
-        const secretBytes = await getSecret(kv);
+        const secretBytes = await getSecret(admin, kv);
         const exp = Math.floor(Date.now() / 1000) + SESSION_TTL;
         const token = await signToken({ u: admin.username, v: admin.tokenVersion, exp }, secretBytes);
         const res = json({ ok: true, username: admin.username, expiresAt: new Date(exp * 1000).toISOString() });
@@ -1081,7 +1104,7 @@ async function handle(path, method, request, context) {
         // 如果密码变更，重新签发当前会话
         const res = json({ ok: true, username: next.username, passwordChanged: !!newPassword });
         if (newPassword) {
-          const secretBytes = await getSecret(kv);
+          const secretBytes = await getSecret(next, kv);
           const exp = Math.floor(Date.now() / 1000) + SESSION_TTL;
           const token = await signToken({ u: next.username, v: next.tokenVersion, exp }, secretBytes);
           res.headers.append('Set-Cookie', cookieHeader(token, SESSION_TTL, isSecureRequest(request)));

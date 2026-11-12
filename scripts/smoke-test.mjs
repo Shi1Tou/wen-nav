@@ -443,6 +443,21 @@ console.log('\n[12] 修改管理员名称与密码');
   const accInfo = await call('/api/admin/data');
   ok('账号信息标记为非默认密码', accInfo.data.account && accInfo.data.account.isDefault === false);
   ok('账号信息不泄露哈希与盐', !JSON.stringify(accInfo.data.account).match(/hash|salt/));
+  ok('账号信息不泄露签名密钥', !JSON.stringify(accInfo.data).match(/signSecret/));
+
+  // 回归：登录后连续多次请求会话必须稳定（模拟线上"登录后几秒被踢回登录页"的场景）
+  let stableFails = 0;
+  for (let i = 0; i < 6; i++) {
+    const chk = await call('/api/auth/check');
+    if (!(chk.status === 200 && chk.data && chk.data.isAdmin === true)) stableFails++;
+    const dat = await call('/api/admin/data');
+    if (dat.status !== 200) stableFails++;
+  }
+  ok('登录后连续 6 轮 check+data 会话保持稳定', stableFails === 0, '失败次数=' + stableFails);
+
+  // 回归：bootstrap 在登录态下也应稳定返回 isAdmin=true（前台入口状态依赖它）
+  const bsAuth = await call('/api/bootstrap');
+  ok('登录态下 bootstrap 返回 isAdmin=true', bsAuth.status === 200 && bsAuth.data.isAdmin === true);
 
   // 还原用户名与密码为默认值，方便用户开箱体验（否则本地跑完测试后默认密码会失效）
   await call('/api/auth/account', { method: 'POST', body: { currentPassword: 'Str0ng!Pass#2026', newUsername: 'admin', newPassword: 'admin123' } });
@@ -454,6 +469,10 @@ console.log('\n[12] 修改管理员名称与密码');
   const relogin = await call('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'admin123' } });
   ok('还原后可用默认账号 admin/admin123 重新登录', relogin.status === 200 && relogin.data.ok === true,
     'status=' + relogin.status);
+  // 改密会重签密钥路径，新会话同样必须稳定
+  const postRestore = await call('/api/admin/data');
+  ok('还原密码后新会话仍可访问管理数据', postRestore.status === 200 && postRestore.data.ok === true,
+    'status=' + postRestore.status);
 }
 
 /* ---------- 13. 登出 ---------- */
@@ -485,6 +504,58 @@ console.log('\n[14] 静态资源');
     const t = await r.text();
     ok('资源 ' + p + ' 可访问且非空', r.status === 200 && t.length > 500, 'status=' + r.status + ' len=' + t.length);
   }
+}
+
+/* ---------- 15. 登录态稳定回归（前端源码静态断言） ---------- */
+console.log('\n[15] 登录态稳定回归（修复“登录后数秒被踢回登录页”）');
+{
+  const adminRaw = await (await fetch(BASE + '/assets/admin.js')).text();
+  // 静态断言基于「剥离注释后的代码」做位置比较，
+  // 否则注释里出现的同名标识符（如 refreshAdminEntry）会抢先命中造成误报
+  const adminSrc = adminRaw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1');
+
+  // 根因 1：登录成功后必须先同步 nav.js 状态，再刷新入口按钮，
+  // 否则 refreshAdminEntry 会用旧状态经 syncAuth(false) 把登录态打回
+  const loginStart = adminSrc.indexOf('S.isAdmin = true;');
+  ok('测试前置：定位到登录成功处理段', loginStart > -1);
+  // 注意：renderShell(); 在 open() 中更早出现，必须从 loginStart 之后搜索
+  const loginEnd = adminSrc.indexOf('renderShell();', loginStart);
+  const loginBlock = adminSrc.slice(loginStart, loginEnd > -1 ? loginEnd : loginStart + 1200);
+  ok('登录成功处理中先同步 NavBox.state 再 refreshAdminEntry',
+    loginBlock.indexOf('NavBox.state.isAdmin = true') > -1 &&
+    loginBlock.indexOf('NavBox.state.isAdmin = true') < loginBlock.indexOf('refreshAdminEntry()'),
+    '检查 admin.js 登录成功处理段');
+
+  // 根因 1 连带：401 处理必须清理 nav.js 状态，避免 refreshAdminEntry 回填旧 true 造成循环
+  const e401Start = adminSrc.indexOf('if (e.status === 401)');
+  ok('测试前置：定位到 401 处理段', e401Start > -1);
+  const e401End = adminSrc.indexOf('renderLogin();', e401Start);
+  const e401Block = adminSrc.slice(e401Start, e401End > -1 ? e401End : e401Start + 900);
+  ok('401 处理中同步清理 NavBox.state',
+    e401Block.indexOf('NavBox.state.isAdmin = false') > -1);
+
+  // 并发保护：loadAdminData 有 in-flight 守卫
+  ok('loadAdminData 具备并发请求守卫',
+    adminSrc.indexOf('adminDataInFlight') > -1);
+
+  // 根因 2：签名密钥必须内联在 admin 记录（与 tokenVersion 同条读写），
+  // 消除多边缘节点下独立密钥键被重新生成、导致全员令牌失效的竞态
+  const fs = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  // 项目路径含中文时 URL.pathname 会百分号编码，必须用 fileURLToPath 还原
+  const fnPath = fileURLToPath(new URL('../edge-functions/api/[[default]].js', import.meta.url));
+  const fnSrc = fs.readFileSync(fnPath, 'utf8');
+  ok('后端 getSecret 已改为 (admin, kv) 双参签名',
+    /async function getSecret\(admin, kv\)/.test(fnSrc));
+  ok('后端不再以旧单参形式调用 getSecret(kv)',
+    fnSrc.indexOf('getSecret(kv)') === -1);
+  ok('密钥内联于 signSecret 字段并随 admin 记录写入',
+    fnSrc.indexOf('admin.signSecret = secret') > -1 &&
+    fnSrc.indexOf('writeJSON(kv, K.admin, admin)') > -1);
+  ok('保留旧独立密钥键的一次性迁移逻辑',
+    fnSrc.indexOf('kv.get(K.secret)') > -1);
 }
 
 /* ---------- 汇总 ---------- */

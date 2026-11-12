@@ -280,7 +280,17 @@
         });
         S.isAdmin = true;
         S.username = res.username || $('#lgUser').value.trim();
-        if (window.NavBox) window.NavBox.refreshAdminEntry();
+        // 必须先同步 nav.js 的登录状态再刷新入口：
+        // refreshAdminEntry() 读取的是 nav.js 的 state.isAdmin（登录前为 false），
+        // 若不同步，它会通过 syncAuth(false) 把刚置位的登录态打回，
+        // 待 loadAdminData 返回后再次触发 syncAuth(false)，界面被踢回登录页
+        if (window.NavBox) {
+          if (window.NavBox.state) {
+            window.NavBox.state.isAdmin = true;
+            window.NavBox.state.username = S.username;
+          }
+          window.NavBox.refreshAdminEntry();
+        }
         toast('登录成功', 'ok', 1600);
         $('#adminHeadText').textContent = '管理后台';
         renderShell();
@@ -340,7 +350,11 @@
     }
   }
 
+  let adminDataInFlight = false;
   async function loadAdminData(silent) {
+    // 防止登录流程与 syncAuth 同时触发造成并发重复请求
+    if (adminDataInFlight) return;
+    adminDataInFlight = true;
     try {
       const data = await api(API.data);
       S.data = data;
@@ -351,13 +365,25 @@
     } catch (e) {
       if (e.status === 401) {
         S.isAdmin = false;
-        if (window.NavBox) window.NavBox.refreshAdminEntry();
+        S.data = null;
+        S.username = null;
+        // 同步清理 nav.js 的登录状态：否则 refreshAdminEntry 会把它的旧状态
+        // （isAdmin=true）回填给 syncAuth，再次触发 loadAdminData 形成 401 循环
+        if (window.NavBox) {
+          if (window.NavBox.state) {
+            window.NavBox.state.isAdmin = false;
+            window.NavBox.state.username = null;
+          }
+          window.NavBox.refreshAdminEntry();
+        }
         renderLogin();
         toast('登录已过期，请重新登录', 'err');
         return;
       }
       $('#tabHost').innerHTML =
         '<div class="tab-panel"><div class="notice warn">' + esc(e.message || '加载失败') + '</div></div>';
+    } finally {
+      adminDataInFlight = false;
     }
   }
 
@@ -382,7 +408,16 @@
     S.isAdmin = false;
     S.data = null;
     S.username = null;
-    if (window.NavBox) { window.NavBox.refreshAdminEntry(); window.NavBox.reload(true); }
+    if (window.NavBox) {
+      // 先清 nav.js 的登录状态，避免 refreshAdminEntry 把旧的 true 回填给
+      // syncAuth，导致退出过程中再发起一次注定 401 的数据请求
+      if (window.NavBox.state) {
+        window.NavBox.state.isAdmin = false;
+        window.NavBox.state.username = null;
+      }
+      window.NavBox.refreshAdminEntry();
+      window.NavBox.reload(true);
+    }
     renderLogin();
     toast('已退出登录', 'ok', 1600);
   }
