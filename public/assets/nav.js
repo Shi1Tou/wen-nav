@@ -194,6 +194,18 @@
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
+  /** 注入书签尺寸相关的 CSS 变量（后台「设置 → 书签大小」） */
+  function applySizeVars(layout) {
+    const l = layout || {};
+    const num = (v, d) => (v == null || v === '' || !isFinite(Number(v)) ? d : Number(v));
+    const root = document.documentElement;
+    root.style.setProperty('--card-icon', num(l.iconSize, 38) + 'px');
+    root.style.setProperty('--card-title-size', num(l.titleSize, 14) + 'px');
+    root.style.setProperty('--card-desc-size', num(l.descSize, 11.5) + 'px');
+    root.style.setProperty('--card-pad', num(l.cardPadding, 11) + 'px');
+    root.style.setProperty('--grid-gap', num(l.gridGap, 14) + 'px');
+  }
+
   function applySettings() {
     const s = state.settings;
     if (!s) return;
@@ -212,6 +224,8 @@
     root.style.setProperty('--bg-brightness', num(bg.brightness, 100) + '%');
     root.style.setProperty('--bg-overlay', num(bg.overlay, 30) / 100);
 
+    // 书签尺寸（图标 / 字号 / 内边距 / 间距），由后台「设置 → 书签大小」控制
+    applySizeVars(layout);
     // 透明度、背景色与文字色（文字色最终由 applyCardColors 按可读性决定）
     state.cardAlpha = Math.max(0, Math.min(1, num(card.opacity, 82) / 100));
     state.cardBgColor = card.bgColor || '#ffffff';
@@ -603,7 +617,7 @@
         siteTitle: 'NavBox 导航', siteSubtitle: '尚未连接到后端数据',
         background: { type: 'gradient', gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)', overlay: 30 },
         card: { opacity: 82, blur: 12, radius: 14, textColor: '#1f2430', bgColor: '#ffffff', hoverScale: true },
-        layout: { minCardWidth: 168, showDesc: true, showGroupIcon: true },
+        layout: { minCardWidth: 168, showDesc: true, showGroupIcon: true, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 },
         favicon: { provider: 'favicon.im' },
         search: { enabled: true, placeholder: '搜索书签…', openInNewTab: true },
         footer: ''
@@ -764,6 +778,7 @@
         root.style.setProperty('--bg-blur', ((s.background && s.background.blur) || 0) + 'px');
         root.style.setProperty('--bg-brightness', ((s.background && s.background.brightness) || 100) + '%');
         root.style.setProperty('--bg-overlay', ((s.background && s.background.overlay == null) ? 30 : s.background.overlay) / 100);
+        applySizeVars(layout);
         document.body.classList.toggle('no-desc', layout.showDesc === false);
         document.body.classList.toggle('dense-mobile', !!layout.denseMobile);
         document.body.classList.toggle('hover-scale', card.hoverScale !== false);

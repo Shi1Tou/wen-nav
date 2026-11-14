@@ -8,6 +8,7 @@
     "mock": "node dev-server.mjs",
     "mock:reset": "node scripts/reset-local-kv.mjs",
     "test": "node scripts/smoke-test.mjs",
+    "test:ui": "node scripts/ui-smoke-test.mjs",
     "deploy": "edgeone makers deploy -n navbox",
     "deploy:preview": "edgeone makers deploy -n navbox -e preview"
   },

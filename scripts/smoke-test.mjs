@@ -558,6 +558,133 @@ console.log('\n[15] 登录态稳定回归（修复“登录后数秒被踢回登
     fnSrc.indexOf('kv.get(K.secret)') > -1);
 }
 
+/* ---------- 16. 设置页新功能（批量可见性 / 书签大小 / 死链检测 / 分组排序） ---------- */
+console.log('\n[16] 设置页：批量可见性 / 书签大小 / 死链检测 / 分组排序');
+{
+  // 本段需要管理员会话（第 13 段已登出）
+  const lg = await call('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'admin123' } });
+  ok('为设置页功能重新登录成功', lg.status === 200 && lg.data.ok === true, JSON.stringify(lg.data));
+
+  // ---- 准备：分组与书签 ----
+  const g = await call('/api/admin/group', { method: 'POST', body: { action: 'create', group: { name: '设置测试组', icon: '🧪' } } });
+  ok('创建设置测试分组', g.status === 200 && g.data.ok === true);
+  const gid = g.data.group.id;
+  const ids = [];
+  for (let i = 1; i <= 3; i++) {
+    const c = await call('/api/admin/link', {
+      method: 'POST',
+      body: { action: 'create', link: { title: '设置测试书签' + i, url: 'https://settings-test-' + i + '.invalid/', groupId: gid, visibility: 'public' } }
+    });
+    if (c.data && c.data.link) ids.push(c.data.link.id);
+  }
+  ok('创建 3 个测试书签', ids.length === 3, 'count=' + ids.length);
+
+  // ---- 私密 / 公开批量设置 ----
+  const b1 = await call('/api/admin/link', { method: 'POST', body: { action: 'bulk', ids: ids.slice(0, 2), visibility: 'private' } });
+  ok('按 id 批量设为私密成功', b1.status === 200 && b1.data.updated === 2, JSON.stringify(b1.data));
+  let data = await call('/api/admin/data');
+  const privCount = ids.filter(id => (data.data.links || []).some(l => l.id === id && l.visibility === 'private')).length;
+  ok('2 个书签已变为私密', privCount === 2, 'priv=' + privCount);
+
+  const pm = await call('/api/admin/link', { method: 'POST', body: { action: 'bulk', ids: [], visibility: 'public' } });
+  ok('批量操作缺少 id 时返回 400', pm.status === 400, 'status=' + pm.status);
+  const pf = await call('/api/admin/link', { method: 'POST', body: { action: 'bulk', ids: ids, visibility: 'neon' } });
+  ok('批量操作缺少有效字段时返回 400', pf.status === 400, 'status=' + pf.status);
+
+  const b2 = await call('/api/admin/link', { method: 'POST', body: { action: 'bulk', all: true, filterGroupId: gid, visibility: 'private' } });
+  ok('按分组批量设为私密成功', b2.status === 200 && b2.data.updated === 3, JSON.stringify(b2.data));
+  // 用未登录的匿名请求验证：私密书签不应出现在 /api/bootstrap
+  const bs1Raw = await fetch(BASE + '/api/bootstrap');
+  const bs1 = { data: await bs1Raw.json() };
+  ok('批量设为私密后前台不再返回这些书签',
+    bs1Raw.status === 200 && bs1.data.isAdmin === false &&
+    ids.every(id => !(bs1.data.links || []).some(l => l.id === id)));
+
+  const b3 = await call('/api/admin/link', { method: 'POST', body: { action: 'bulk', ids: ids, visibility: 'public' } });
+  ok('批量恢复公开成功', b3.status === 200 && b3.data.updated === 3, JSON.stringify(b3.data));
+
+  // ---- 书签大小调整 ----
+  const sz = await call('/api/admin/settings', {
+    method: 'POST',
+    body: { settings: { layout: { minCardWidth: 150, iconSize: 30, titleSize: 12.5, descSize: 10.5, cardPadding: 8, gridGap: 10 } } }
+  });
+  const L = sz.data.settings.layout;
+  ok('书签大小设置已保存',
+    L.iconSize === 30 && L.titleSize === 12.5 && L.descSize === 10.5 && L.cardPadding === 8 && L.gridGap === 10 && L.minCardWidth === 150,
+    JSON.stringify(L));
+  ok('尺寸设置不影响其他布局字段', L.showDesc === true && L.denseMobile === false, JSON.stringify(L));
+
+  const sClamp = await call('/api/admin/settings', {
+    method: 'POST',
+    body: { settings: { layout: { iconSize: 999, titleSize: 1, descSize: -5, cardPadding: 99, gridGap: 0, minCardWidth: 999 } } }
+  });
+  const C = sClamp.data.settings.layout;
+  ok('图标尺寸越界夹紧到 64', C.iconSize === 64, String(C.iconSize));
+  ok('标题字号越界夹紧到 10', C.titleSize === 10, String(C.titleSize));
+  ok('描述字号越界夹紧到 9', C.descSize === 9, String(C.descSize));
+  ok('卡片内边距越界夹紧到 24', C.cardPadding === 24, String(C.cardPadding));
+  ok('卡片间距越界夹紧到 6', C.gridGap === 6, String(C.gridGap));
+  ok('卡片最小宽度越界夹紧到 420', C.minCardWidth === 420, String(C.minCardWidth));
+
+  const bs2 = await call('/api/bootstrap');
+  ok('前台 bootstrap 返回书签尺寸字段', bs2.data.settings.layout && bs2.data.settings.layout.iconSize === 64);
+  ok('旧数据缺少尺寸字段时由 mergeSettings 补齐', typeof bs2.data.settings.layout.titleSize === 'number');
+
+  // 恢复标准尺寸
+  await call('/api/admin/settings', {
+    method: 'POST',
+    body: { settings: { layout: { minCardWidth: 168, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 } } }
+  });
+
+  // ---- 死链检测（不依赖外网：只验证校验与安全边界） ----
+  const lcEmpty = await call('/api/admin/linkcheck', { method: 'POST', body: { action: 'check', links: [] } });
+  ok('死链检测空列表返回 400', lcEmpty.status === 400, 'status=' + lcEmpty.status);
+  const lcLocal = await call('/api/admin/linkcheck', {
+    method: 'POST',
+    body: { action: 'check', links: [{ id: 'ssrf', url: 'http://127.0.0.1:8787/api/health' }] }
+  });
+  const lr = (lcLocal.data.results || [])[0] || {};
+  ok('内网地址被安全拦截（不发起请求）', lr.state === 'blocked' && lr.status === 0, JSON.stringify(lr));
+  const lcFile = await call('/api/admin/linkcheck', {
+    method: 'POST',
+    body: { action: 'check', links: [{ id: 'file', url: 'file:///etc/passwd' }] }
+  });
+  ok('非 http/https 协议被判为无效', ((lcFile.data.results || [])[0] || {}).state === 'invalid');
+  const lcSave = await call('/api/admin/linkcheck', { method: 'POST', body: { action: 'save', items: [] } });
+  ok('保存检测结果成功', lcSave.status === 200 && lcSave.data.linkCheck.total === 0);
+  const lcGet = await call('/api/admin/linkcheck');
+  ok('可读取上次检测结果', lcGet.status === 200 && lcGet.data.linkCheck !== null);
+  const lcInData = await call('/api/admin/data');
+  ok('管理数据包含 linkCheck 字段', 'linkCheck' in lcInData.data);
+
+  cookie = '';
+  const lcNoAuth = await call('/api/admin/linkcheck', {
+    method: 'POST', body: { action: 'check', links: [{ url: 'https://example.com' }] }
+  });
+  ok('未登录调用死链检测返回 401', lcNoAuth.status === 401, 'status=' + lcNoAuth.status);
+  const lg2 = await call('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'admin123' } });
+  ok('重新登录以继续后续清理', lg2.status === 200 && lg2.data.ok === true);
+
+  // ---- 分组排序调整 ----
+  const all = await call('/api/admin/data');
+  const others = (all.data.groups || []).filter(x => x.id !== gid);
+  const move = [{ id: gid, order: 1 }].concat(others.map((x, i) => ({ id: x.id, order: i + 2 })));
+  const gr = await call('/api/admin/group', { method: 'POST', body: { action: 'reorder', orders: move } });
+  ok('分组重排到第一位成功', gr.status === 200 && gr.data.ok === true);
+  const top = (gr.data.groups || [])[0];
+  ok('重排后设置测试组位于首位', top && top.id === gid, JSON.stringify(top));
+
+  // 恢复原顺序
+  const origin = (all.data.groups || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  await call('/api/admin/group', {
+    method: 'POST', body: { action: 'reorder', orders: origin.map((x, i) => ({ id: x.id, order: i + 1 })) }
+  });
+
+  // ---- 清理 ----
+  const del = await call('/api/admin/group', { method: 'POST', body: { action: 'delete', id: gid, force: true } });
+  ok('清理设置测试分组及书签', del.status === 200 && del.data.deletedLinks === 3, JSON.stringify(del.data));
+}
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(46));
 console.log('  通过：' + pass + '    失败：' + fail + '    总计：' + (pass + fail));
