@@ -630,10 +630,22 @@ console.log('\n[16] 私密设置：批量可见性 / 书签大小 / 背景图片
   ok('前台 bootstrap 返回书签尺寸字段', bs2.data.settings.layout && bs2.data.settings.layout.iconSize === 64);
   ok('旧数据缺少尺寸字段时由 mergeSettings 补齐', typeof bs2.data.settings.layout.titleSize === 'number');
 
-  // 恢复标准尺寸
+  // ---- 书签布局预设（排列方式） ----
+  const cs = await call('/api/admin/settings', {
+    method: 'POST', body: { settings: { layout: { cardStyle: 'tile' } } }
+  });
+  ok('图标墙排列方式已保存', cs.data.settings.layout.cardStyle === 'tile', cs.data.settings.layout.cardStyle);
+  const csBad = await call('/api/admin/settings', {
+    method: 'POST', body: { settings: { layout: { cardStyle: 'neon' } } }
+  });
+  ok('非法排列方式不会覆盖原值', csBad.data.settings.layout.cardStyle === 'tile', csBad.data.settings.layout.cardStyle);
+  const bs3 = await (await fetch(BASE + '/api/bootstrap')).json();
+  ok('前台 bootstrap 返回书签排列方式', bs3.settings.layout.cardStyle === 'tile');
+
+  // 恢复标准布局
   await call('/api/admin/settings', {
     method: 'POST',
-    body: { settings: { layout: { minCardWidth: 168, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 } } }
+    body: { settings: { layout: { cardStyle: 'row', minCardWidth: 168, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 } } }
   });
 
   // ---- 背景：外链图片 ----

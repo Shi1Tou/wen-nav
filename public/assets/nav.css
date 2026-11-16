@@ -324,6 +324,22 @@ body.hover-scale .card:hover { transform: translateY(-3px) scale(1.015); }
 }
 body.no-desc .card .c-desc { display: none; }
 
+/* 书签排列方式：图标墙（图标在上）/ 列表（每行一个） */
+body.card-tile .card {
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  gap: calc(var(--card-pad) * .6 * var(--size-scale));
+  min-height: calc((var(--card-icon) + var(--card-pad) * 2 + 18px) * var(--size-scale));
+}
+body.card-tile .card .c-body { flex: 0 0 auto; width: 100%; }
+body.card-tile .card .c-title,
+body.card-tile .card .c-desc { text-align: center; }
+body.card-tile .card .c-badge { top: 4px; right: 5px; }
+
+body.card-list .grid { grid-template-columns: 1fr; }
+body.card-list .card { min-height: calc((var(--card-icon) + var(--card-pad) * 2) * var(--size-scale)); }
+
 .card .c-badge {
   position: absolute;
   top: 6px; right: 7px;

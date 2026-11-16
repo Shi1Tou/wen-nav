@@ -137,6 +137,7 @@
       case 'icon.horse': return 'https://icon.horse/icon/' + encodeURIComponent(domain);
       case 'google': return 'https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=64&url=' + encodeURIComponent('https://' + domain);
       case 'direct': return 'https://' + domain + '/favicon.ico';
+      case 'custom': return '';
       default: return 'https://favicon.im/' + encodeURIComponent(domain) + '?larger=true';
     }
   }
@@ -145,12 +146,15 @@
     const domain = domainOf(link.url);
     const provider = (S.data && S.data.settings && S.data.settings.favicon && S.data.settings.favicon.provider) || 'favicon.im';
     if (link.icon && (link.iconType === 'custom' || provider === 'custom')) out.push(link.icon);
+    // 站点直连通常最快，其次才是配置的第三方源；Google 源放最后
+    const direct = providerUrl('direct', domain);
+    if (direct) out.push(direct);
     const p = providerUrl(provider, domain);
     if (p) out.push(p);
     ['favicon.im','icon.horse','google','direct'].forEach(x => {
       if (x !== provider) { const u = providerUrl(x, domain); if (u && out.indexOf(u) === -1) out.push(u); }
     });
-    return out;
+    return out.filter((u, i) => u && out.indexOf(u) === i);
   }
   /** 返回一个 DOM 节点作为图标（带回退） */
   function buildIconNode(link, size) {
@@ -169,17 +173,24 @@
     if (link.iconType === 'text') { showText(); return box; }
     const cands = iconCandidates(link);
     if (!cands.length) { showText(); return box; }
+    // 先显示首字占位，避免后台列表长时间空白
+    showText();
     let i = 0;
+    let done = false;
     const next = () => {
+      if (done) return;
       if (i >= cands.length) return showText();
       const img = new Image();
+      const timer = setTimeout(() => { try { img.src = ''; } catch (e) {} next(); }, 3000);
       img.referrerPolicy = 'no-referrer';
       img.alt = '';
       img.onload = () => {
-        if (img.naturalWidth <= 1) return next();
+        clearTimeout(timer);
+        if (img.naturalWidth <= 1 || img.naturalHeight <= 1) return next();
+        done = true;
         box.innerHTML = ''; box.appendChild(img);
       };
-      img.onerror = next;
+      img.onerror = () => { clearTimeout(timer); next(); };
       img.src = cands[i++];
     };
     next();
@@ -1149,12 +1160,15 @@
     const card = s.card || {};
     const layout = s.layout || {};
 
-    const SIZE_DEFAULTS = { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 };
+    const SIZE_DEFAULTS = { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5, cardStyle: 'row' };
     const SIZE_PRESETS = {
-      compact: { minCardWidth: 140, gridGap: 10, iconSize: 30, cardPadding: 8, titleSize: 12.5, descSize: 10.5 },
-      standard: { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 },
-      large: { minCardWidth: 200, gridGap: 16, iconSize: 46, cardPadding: 14, titleSize: 15.5, descSize: 12.5 },
-      xlarge: { minCardWidth: 240, gridGap: 18, iconSize: 54, cardPadding: 16, titleSize: 17, descSize: 13.5 }
+      standard: { cardStyle: 'row', minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5, showDesc: true },
+      compact: { cardStyle: 'row', minCardWidth: 140, gridGap: 10, iconSize: 30, cardPadding: 8, titleSize: 12.5, descSize: 10.5, showDesc: true },
+      minimal: { cardStyle: 'row', minCardWidth: 130, gridGap: 8, iconSize: 26, cardPadding: 6, titleSize: 12, descSize: 10.5, showDesc: false },
+      large: { cardStyle: 'row', minCardWidth: 200, gridGap: 16, iconSize: 46, cardPadding: 14, titleSize: 15.5, descSize: 12.5, showDesc: true },
+      xlarge: { cardStyle: 'row', minCardWidth: 240, gridGap: 18, iconSize: 54, cardPadding: 16, titleSize: 17, descSize: 13.5, showDesc: true },
+      tile: { cardStyle: 'tile', minCardWidth: 110, gridGap: 10, iconSize: 44, cardPadding: 10, titleSize: 12.5, descSize: 10.5, showDesc: false },
+      list: { cardStyle: 'list', minCardWidth: 280, gridGap: 12, iconSize: 34, cardPadding: 10, titleSize: 14, descSize: 12, showDesc: true }
     };
     function sizeNum(k) {
       const v = Number(layout[k]);
@@ -1162,6 +1176,7 @@
     }
     function sizeValues() {
       return {
+        cardStyle: $('#lCardStyle') ? $('#lCardStyle').value : 'row',
         minCardWidth: Number($('#szMinW').value),
         gridGap: Number($('#szGap').value),
         iconSize: Number($('#szIcon').value),
@@ -1210,7 +1225,7 @@
              ['google','Google favicon（需可访问 Google）'],['direct','站点 /favicon.ico（最省流量）'],
              ['custom','全部使用自定义图标']]
             .map(o => '<option value="' + o[0] + '"' + ((s.favicon && s.favicon.provider) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') +
-          '</select><div class="field-hint">抓取失败时会自动尝试其它源，全部失败则显示名称首字。</div></div>' +
+          '</select><div class="field-hint">优先直连站点 /favicon.ico，失败后使用所选图标源，再依次回退其它源；全部失败显示名称首字。</div></div>' +
         '</div>' +
         '<label class="switch"><input type="checkbox" id="sPrivateBadge"' + (s.privateBadge !== false ? ' checked' : '') + '>' +
           '<span class="track"></span><span class="lbl">管理员视图下给私密书签显示「私密」角标</span></label>' +
@@ -1282,14 +1297,25 @@
         '<label class="switch"><input type="checkbox" id="cHover"' + (card.hoverScale !== false ? ' checked' : '') + '>' +
           '<span class="track"></span><span class="lbl">悬停时卡片轻微上浮放大</span></label>' +
         '<hr class="divider">' +
-        '<div class="field"><label>书签大小预设</label>' +
+        '<div class="field"><label>书签布局预设</label>' +
           '<div class="btn-group" id="sizePresets">' +
-            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="compact">紧凑</button>' +
             '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="standard">标准</button>' +
-            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="large">大</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="compact">紧凑</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="minimal">极简</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="large">大卡片</button>' +
             '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="xlarge">超大</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="tile">图标墙</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="list">列表</button>' +
           '</div>' +
-          '<div class="field-hint">预设会同时调整卡片宽度、间距、图标尺寸与字号；也可用下方滑杆逐项微调。</div>' +
+          '<div class="field-hint">预设会同时调整排列方式、卡片宽度、间距、图标尺寸与字号；也可用下方选项单独微调。</div>' +
+        '</div>' +
+        '<div class="field"><label>卡片排列方式</label>' +
+          '<select class="select" id="lCardStyle">' +
+            '<option value="row"' + ((layout.cardStyle || 'row') === 'row' ? ' selected' : '') + '>横向：图标在左，文字在右</option>' +
+            '<option value="tile"' + (layout.cardStyle === 'tile' ? ' selected' : '') + '>图标墙：图标在上，名称在下</option>' +
+            '<option value="list"' + (layout.cardStyle === 'list' ? ' selected' : '') + '>列表：每行一个书签</option>' +
+          '</select>' +
+          '<div class="field-hint">图标墙适合图标多、文字少的站点；列表适合描述较长的书签。</div>' +
         '</div>' +
         '<div class="size-preview" id="sizePrev"></div>' +
         '<div class="row2">' +
@@ -1487,8 +1513,12 @@
       }
       el.style.filter = 'blur(' + Math.min(m.blur, 6) + 'px) brightness(' + m.brightness + '%)';
 
-      // 书签尺寸：数值回显 + 卡片预览 + 预设高亮
+      // 书签布局：数值回显 + 卡片预览 + 预设高亮
       if ($('#sizePrev')) {
+        const isTile = sz.cardStyle === 'tile';
+        const isList = sz.cardStyle === 'list';
+        const showDesc = $('#lDesc').checked;
+        const prevGap = isTile ? sz.cardPadding * 0.6 : sz.cardPadding * 0.9;
         $('#vSzMinW').textContent = sz.minCardWidth + 'px';
         $('#vSzGap').textContent = sz.gridGap + 'px';
         $('#vSzIcon').textContent = sz.iconSize + 'px';
@@ -1496,21 +1526,26 @@
         $('#vSzTitle').textContent = sz.titleSize + 'px';
         $('#vSzDesc').textContent = sz.descSize + 'px';
         $('#sizePrev').innerHTML =
-          '<div class="sp-card" style="display:flex;align-items:center;gap:' + (sz.cardPadding * 0.9) + 'px;' +
+          '<div class="sp-card" style="display:flex;' + (isTile ? 'flex-direction:column;text-align:center;' : '') +
+            'align-items:center;justify-content:center;gap:' + prevGap + 'px;' +
             'padding:' + sz.cardPadding + 'px ' + (sz.cardPadding + 1) + 'px;border-radius:12px;background:#fff;' +
-            'border:1px solid #e3e7f0;max-width:340px;min-height:' + (sz.iconSize + sz.cardPadding * 2) + 'px;' +
-            'box-shadow:0 3px 12px rgba(30,50,100,.08)">' +
+            'border:1px solid #e3e7f0;max-width:' + (isList ? 420 : 340) + 'px;min-height:' +
+            (sz.iconSize + sz.cardPadding * 2) + 'px;box-shadow:0 3px 12px rgba(30,50,100,.08)">' +
             '<div style="flex:0 0 ' + sz.iconSize + 'px;width:' + sz.iconSize + 'px;height:' + sz.iconSize + 'px;' +
               'border-radius:9px;background:linear-gradient(135deg,#5b8cff,#7c5bff);display:grid;place-items:center;' +
               'color:#fff;font-weight:700;font-size:' + (sz.iconSize * 0.42).toFixed(1) + 'px">N</div>' +
-            '<div style="min-width:0"><div style="font-size:' + sz.titleSize + 'px;font-weight:650;' +
-              'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">示例书签</div>' +
-              '<div style="font-size:' + sz.descSize + 'px;color:#8a92a6;white-space:nowrap;overflow:hidden;' +
-              'text-overflow:ellipsis">这是书签描述文字预览</div></div>' +
+            '<div style="min-width:0' + (isTile ? ';width:100%' : '') + '"><div style="font-size:' + sz.titleSize +
+              'px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:' +
+              (isTile ? 'center' : 'left') + '">示例书签</div>' +
+              (showDesc ? '<div style="font-size:' + sz.descSize + 'px;color:#8a92a6;white-space:nowrap;overflow:hidden;' +
+              'text-overflow:ellipsis;text-align:' + (isTile ? 'center' : 'left') + '">这是书签描述文字预览</div>' : '') +
+            '</div>' +
           '</div>';
+        const keys = ['minCardWidth', 'gridGap', 'iconSize', 'cardPadding', 'titleSize', 'descSize'];
         $$('#sizePresets [data-size-preset]').forEach(b => {
           const p = SIZE_PRESETS[b.dataset.sizePreset];
-          const same = p && Object.keys(p).every(k => Math.abs(Number(p[k]) - sz[k]) < 0.001);
+          const same = p && p.cardStyle === sz.cardStyle && p.showDesc === showDesc &&
+            keys.every(k => Math.abs(Number(p[k]) - sz[k]) < 0.001);
           b.classList.toggle('active', !!same);
         });
       }
@@ -1563,21 +1598,11 @@
     ['#szMinW', '#szGap', '#szIcon', '#szPad', '#szTitle', '#szDesc'].forEach(sel => {
       $(sel).addEventListener('input', refreshPreview);
     });
-    $$('#sizePresets [data-size-preset]').forEach(b => {
-      b.addEventListener('click', () => {
-        const p = SIZE_PRESETS[b.dataset.sizePreset];
-        if (!p) return;
-        $('#szMinW').value = p.minCardWidth;
-        $('#szGap').value = p.gridGap;
-        $('#szIcon').value = p.iconSize;
-        $('#szPad').value = p.cardPadding;
-        $('#szTitle').value = p.titleSize;
-        $('#szDesc').value = p.descSize;
-        refreshPreview();
-      });
-    });
-    $('#szReset').addEventListener('click', () => {
-      const p = SIZE_PRESETS.standard;
+    $('#lCardStyle').addEventListener('change', refreshPreview);
+    function applySizePreset(p) {
+      if (!p) return;
+      $('#lCardStyle').value = p.cardStyle;
+      $('#lDesc').checked = p.showDesc;
       $('#szMinW').value = p.minCardWidth;
       $('#szGap').value = p.gridGap;
       $('#szIcon').value = p.iconSize;
@@ -1585,7 +1610,13 @@
       $('#szTitle').value = p.titleSize;
       $('#szDesc').value = p.descSize;
       refreshPreview();
-      toast('已填入标准尺寸，点「保存全部设置」生效', 'ok', 2400);
+    }
+    $$('#sizePresets [data-size-preset]').forEach(b => {
+      b.addEventListener('click', () => applySizePreset(SIZE_PRESETS[b.dataset.sizePreset]));
+    });
+    $('#szReset').addEventListener('click', () => {
+      applySizePreset(SIZE_PRESETS.standard);
+      toast('已填入标准布局，点「保存全部设置」生效', 'ok', 2400);
     });
     ['#bgUrl', '#bgGradient', '#cColor', '#cText'].forEach(sel => {
       const el = $(sel);

@@ -104,6 +104,13 @@
 
   /* ---------------- 图标源 ---------------- */
 
+  const ICON_CACHE_KEY = 'navbox_icon_cache_v2';
+  const ICON_CACHE_OK_TTL = 7 * 24 * 3600 * 1000;   // 成功结果缓存 7 天
+  const ICON_CACHE_FAIL_TTL = 6 * 3600 * 1000;      // 失败结果缓存 6 小时，避免反复重试
+  const ICON_TIMEOUT = 3000;                         // 单个图标源超时（毫秒）
+  const ICON_CONCURRENCY = 6;                        // 同时加载的图标数量
+  const ICON_CACHE_MAX = 600;                        // 缓存条数上限
+
   function providerUrl(provider, domain) {
     if (!domain) return '';
     switch (provider) {
@@ -113,33 +120,175 @@
         return 'https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=64&url=' + encodeURIComponent('https://' + domain);
       case 'direct':
         return 'https://' + domain + '/favicon.ico';
+      case 'custom':
+        return '';
       case 'favicon.im':
       default:
         return 'https://favicon.im/' + encodeURIComponent(domain) + '?larger=true';
     }
   }
 
-  /** 生成图标候选链：自定义 → 用户配置的 provider → 常见回退源 */
+  /**
+   * 生成图标候选链：自定义图标 → 站点自身 /favicon.ico → 配置的第三方源 → 其它回退源。
+   * 把站点直连放最前：通常 1 秒内返回；Google 源在国内可能不可达，固定放最后。
+   */
   function iconCandidates(link) {
     const out = [];
     const domain = getDomain(link.url);
     const provider = (state.settings && state.settings.favicon && state.settings.favicon.provider) || 'favicon.im';
 
-    if (link.icon && (link.iconType === 'custom' || provider === 'custom')) {
-      out.push(link.icon);
-    }
-    out.push(providerUrl(provider, domain));
-    // 回退链
+    if (link.icon && (link.iconType === 'custom' || provider === 'custom')) out.push(link.icon);
+    const direct = providerUrl('direct', domain);
+    if (direct) out.push(direct);
+    const preferred = providerUrl(provider, domain);
+    if (preferred) out.push(preferred);
     ['favicon.im', 'icon.horse', 'google', 'direct'].forEach(p => {
-      if (p !== provider) {
-        const u = providerUrl(p, domain);
-        if (u && out.indexOf(u) === -1) out.push(u);
-      }
+      if (p === provider) return;
+      const u = providerUrl(p, domain);
+      if (u && out.indexOf(u) === -1) out.push(u);
     });
-    return out.filter(Boolean);
+    return out.filter((u, i) => u && out.indexOf(u) === i);
   }
 
-  /** 渲染图标：依次尝试候选源，全部失败则显示首字文字图标 */
+  /* ---- 图标缓存（localStorage，失败结果也短时缓存） ---- */
+  let iconCache = (function () {
+    try {
+      const raw = localStorage.getItem(ICON_CACHE_KEY);
+      const obj = raw ? JSON.parse(raw) : null;
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch (e) { return {}; }
+  })();
+  let iconCacheTimer = null;
+
+  function pruneIconCache() {
+    const keys = Object.keys(iconCache);
+    if (keys.length <= ICON_CACHE_MAX) return;
+    keys.sort((a, b) => (iconCache[a].at || 0) - (iconCache[b].at || 0));
+    keys.slice(0, keys.length - ICON_CACHE_MAX).forEach(k => { delete iconCache[k]; });
+  }
+
+  function saveIconCache() {
+    pruneIconCache();
+    clearTimeout(iconCacheTimer);
+    iconCacheTimer = setTimeout(() => {
+      try { localStorage.setItem(ICON_CACHE_KEY, JSON.stringify(iconCache)); }
+      catch (e) { /* 隐私模式 / 容量不足时忽略 */ }
+    }, 400);
+  }
+
+  function iconCacheGet(key) {
+    const rec = iconCache[key];
+    if (!rec) return null;
+    const ttl = rec.url ? ICON_CACHE_OK_TTL : ICON_CACHE_FAIL_TTL;
+    if (!rec.at || Date.now() - rec.at > ttl) { delete iconCache[key]; saveIconCache(); return null; }
+    return rec;
+  }
+
+  function iconCacheSet(key, url) {
+    // 内嵌 data URI 图标无需写入 localStorage，避免占用配额
+    if (url && url.indexOf('data:') === 0) return;
+    iconCache[key] = { url: url || null, at: Date.now() };
+    saveIconCache();
+  }
+
+  function iconCacheKey(link) {
+    const domain = getDomain(link.url);
+    const provider = (state.settings && state.settings.favicon && state.settings.favicon.provider) || 'favicon.im';
+    let h = 0;
+    const s = String(link.icon || '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return domain + '|' + provider + '|' + (link.iconType === 'custom' ? h : '');
+  }
+
+  /* ---- 图标加载队列：限制并发 + 同一图标去重 ---- */
+  const iconQueue = [];
+  const iconInflight = new Map();
+  let iconActive = 0;
+
+  function pumpIconQueue() {
+    while (iconActive < ICON_CONCURRENCY && iconQueue.length) {
+      const job = iconQueue.shift();
+      iconActive++;
+      Promise.resolve().then(job.fn).then(job.resolve, job.resolve).then(() => {
+        iconActive--;
+        pumpIconQueue();
+      });
+    }
+  }
+
+  function enqueueIcon(fn) {
+    return new Promise(resolve => {
+      iconQueue.push({ fn: fn, resolve: resolve });
+      pumpIconQueue();
+    });
+  }
+
+  function loadImage(url) {
+    return new Promise(resolve => {
+      const img = new Image();
+      let finished = false;
+      const done = ok => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        // 超时 / 失败时主动取消未完成的图片请求，避免占用连接拖慢其它图标
+        if (!ok) { try { img.src = ''; } catch (e) { /* 忽略 */ } }
+        img.onload = img.onerror = null;
+        resolve(ok ? img : null);
+      };
+      const timer = setTimeout(() => done(false), ICON_TIMEOUT);
+      img.referrerPolicy = 'no-referrer';
+      img.decoding = 'async';
+      img.alt = '';
+      img.onload = () => done(img.naturalWidth > 1 && img.naturalHeight > 1);
+      img.onerror = () => done(false);
+      img.src = url;
+    });
+  }
+
+  /** 同一图标地址只请求一次，多个卡片共享结果 */
+  function resolveIcon(key, cands) {
+    if (iconInflight.has(key)) return iconInflight.get(key);
+    const task = enqueueIcon(() => new Promise(resolve => {
+      let i = 0;
+      const next = () => {
+        if (i >= cands.length) { iconCacheSet(key, null); resolve(null); return; }
+        const url = cands[i++];
+        loadImage(url).then(img => {
+          if (img) { iconCacheSet(key, url); resolve(url); }
+          else next();
+        });
+      };
+      next();
+    })).then(url => {
+      iconInflight.delete(key);
+      return url;
+    }, () => {
+      iconInflight.delete(key);
+      return null;
+    });
+    iconInflight.set(key, task);
+    return task;
+  }
+
+  /* 只加载进入视口（含预加载 300px）的图标，避免一次性发几百个请求 */
+  const iconObserver = (typeof IntersectionObserver !== 'undefined')
+    ? new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          iconObserver.unobserve(entry.target);
+          if (typeof entry.target.__loadIcon === 'function') entry.target.__loadIcon();
+        });
+      }, { rootMargin: '300px 0px' })
+    : null;
+
+  function observeIcon(box, load) {
+    if (!iconObserver) { load(); return; }
+    box.__loadIcon = load;
+    iconObserver.observe(box);
+  }
+
+  /** 渲染图标：先显示首字占位，进入视口后再按候选链加载，失败则保留文字图标 */
   function buildIcon(link) {
     const box = document.createElement('div');
     box.className = 'c-icon';
@@ -160,25 +309,38 @@
     const cands = iconCandidates(link);
     if (cands.length === 0) { showText(); return box; }
 
-    let idx = 0;
-    const tryNext = () => {
-      if (idx >= cands.length) { showText(); return; }
-      const src = cands[idx++];
+    // 先放文字占位，网络图标加载成功后再替换，避免卡片长时间空白
+    showText();
+    const key = iconCacheKey(link);
+
+    const applyImage = url => {
       const img = new Image();
       img.referrerPolicy = 'no-referrer';
-      img.loading = 'lazy';
-      img.decoding = 'async';
       img.alt = '';
+      img.decoding = 'async';
       img.onload = () => {
-        // 过滤 1x1 占位图与明显的错误图
-        if (img.naturalWidth <= 1 || img.naturalHeight <= 1) { tryNext(); return; }
+        if (img.naturalWidth <= 1 || img.naturalHeight <= 1) return;
         box.innerHTML = '';
         box.appendChild(img);
       };
-      img.onerror = tryNext;
-      img.src = src;
+      img.onerror = () => {
+        if (iconCache[key] && iconCache[key].url === url) { delete iconCache[key]; saveIconCache(); }
+      };
+      img.src = url;
     };
-    tryNext();
+
+    const cached = iconCacheGet(key);
+    if (cached) {
+      if (cached.url) applyImage(cached.url);
+      return box;
+    }
+
+    observeIcon(box, () => {
+      resolveIcon(key, cands).then(url => {
+        if (!box.isConnected || !url) return;
+        applyImage(url);
+      });
+    });
     return box;
   }
 
@@ -204,6 +366,9 @@
     root.style.setProperty('--card-desc-size', num(l.descSize, 11.5) + 'px');
     root.style.setProperty('--card-pad', num(l.cardPadding, 11) + 'px');
     root.style.setProperty('--grid-gap', num(l.gridGap, 14) + 'px');
+    // 书签排列方式：横向 / 图标墙 / 列表
+    document.body.classList.toggle('card-tile', l.cardStyle === 'tile');
+    document.body.classList.toggle('card-list', l.cardStyle === 'list');
   }
 
   function applySettings() {
@@ -624,7 +789,7 @@
         siteTitle: 'NavBox 导航', siteSubtitle: '尚未连接到后端数据',
         background: { type: 'gradient', gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)', overlay: 30 },
         card: { opacity: 82, blur: 12, radius: 14, textColor: '#1f2430', bgColor: '#ffffff', hoverScale: true },
-        layout: { minCardWidth: 168, showDesc: true, showGroupIcon: true, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 },
+        layout: { minCardWidth: 168, showDesc: true, showGroupIcon: true, cardStyle: 'row', iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 },
         favicon: { provider: 'favicon.im' },
         search: { enabled: true, placeholder: '搜索书签…', openInNewTab: true },
         footer: ''

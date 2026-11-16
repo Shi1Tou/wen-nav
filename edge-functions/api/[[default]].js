@@ -318,6 +318,7 @@ function defaultSettings() {
       showDesc: true,
       showGroupIcon: true,
       denseMobile: false,
+      cardStyle: 'row',      // row | tile | list
       iconSize: 38,          // 书签图标尺寸 px
       titleSize: 14,         // 书签标题字号 px
       descSize: 11.5,        // 书签描述字号 px
@@ -1348,7 +1349,10 @@ async function handle(path, method, request, context) {
             showDesc: s.layout.showDesc !== undefined ? !!s.layout.showDesc : merged.layout.showDesc,
             showGroupIcon: s.layout.showGroupIcon !== undefined ? !!s.layout.showGroupIcon : merged.layout.showGroupIcon,
             denseMobile: s.layout.denseMobile !== undefined ? !!s.layout.denseMobile : merged.layout.denseMobile,
-            // 书签大小（图标 / 字号 / 内边距 / 间距），用于后台「设置 → 书签大小」
+            // 书签排列方式：row=横向，tile=图标墙，list=列表
+            cardStyle: ['row', 'tile', 'list'].includes(s.layout.cardStyle)
+              ? s.layout.cardStyle : merged.layout.cardStyle,
+            // 书签大小（图标 / 字号 / 内边距 / 间距），用于后台「外观 → 书签卡片样式」
             iconSize: num(s.layout.iconSize, 20, 64, merged.layout.iconSize),
             titleSize: num(s.layout.titleSize, 10, 22, merged.layout.titleSize),
             descSize: num(s.layout.descSize, 9, 18, merged.layout.descSize),

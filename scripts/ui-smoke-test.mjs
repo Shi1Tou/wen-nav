@@ -146,6 +146,17 @@ try {
     doc.documentElement.style.getPropertyValue('--card-icon').trim() === '30px',
     doc.documentElement.style.getPropertyValue('--card-icon'));
   ok('书签大小预览卡片已生成', !!doc.querySelector('#sizePrev .sp-card'));
+  ok('布局预设数量为 7', doc.querySelectorAll('#sizePresets [data-size-preset]').length === 7,
+    'count=' + doc.querySelectorAll('#sizePresets [data-size-preset]').length);
+
+  doc.querySelector('[data-size-preset="tile"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(150);
+  ok('图标墙预设切换排列方式',
+    doc.querySelector('#lCardStyle').value === 'tile' && doc.body.classList.contains('card-tile'),
+    doc.querySelector('#lCardStyle').value + ' / ' + doc.body.className);
+  ok('图标墙预设注入对应图标尺寸',
+    doc.documentElement.style.getPropertyValue('--card-icon').trim() === '44px',
+    doc.documentElement.style.getPropertyValue('--card-icon'));
 
   // 背景：外链图片
   doc.querySelector('#bgType').value = 'url';
@@ -251,7 +262,7 @@ try {
       body: JSON.stringify({
         settings: {
           background: { type: 'gradient', url: '', blur: 0, brightness: 100, overlay: 30, gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' },
-          layout: { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 }
+          layout: { cardStyle: 'row', minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 }
         }
       })
     });
