@@ -1,10 +1,10 @@
 /**
- * NavBox 后台「设置」标签页 UI 回归测试（jsdom 驱动真实前端代码）
+ * NavBox 后台 UI 回归测试（jsdom 驱动真实前端代码）
  *
  * 覆盖：
- *   - 设置标签页渲染（死链检测 / 分组排序 / 批量可见性 / 书签大小 四个区块）
- *   - 书签大小预设：滑杆写入 + 实时注入前台 CSS 变量 + 预览卡片
- *   - 批量可见性：勾选 → 设为私密 → 行内角标更新 → 后端落库 → 自动清空选择
+ *   - 「私密设置」标签页：批量公开 / 私密设置
+ *   - 「外观 → 书签卡片样式」：书签大小预设与实时 CSS 变量
+ *   - 背景设置回归：外链图片 / 上传图片（存 KV）能实时显示并持久化
  *
  * 用法：
  *   1. 先启动本地服务：npm run mock
@@ -12,7 +12,7 @@
  *   3. 运行：          npm run test:ui   （或 node scripts/ui-smoke-test.mjs）
  *
  * 环境变量：BASE 默认 http://localhost:8787
- * 说明：脚本会在测试前后创建 / 删除一条名为「UI测试书签」的临时书签，不影响其他数据。
+ * 说明：脚本会自动创建并删除一条「UI测试书签」，测试结束后恢复背景与书签尺寸，不影响其他数据。
  */
 
 import { readFileSync } from 'node:fs';
@@ -47,6 +47,18 @@ async function waitFor(fn, timeout = 8000) {
   }
   return false;
 }
+/** 轮询 /api/bootstrap，直到匿名视图符合条件 */
+async function waitBootstrap(predicate, timeout = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const j = await (await fetch(BASE + '/api/bootstrap')).json();
+      if (predicate(j)) return j;
+    } catch (e) { /* 忽略 */ }
+    await sleep(150);
+  }
+  return null;
+}
 
 /** 带 Cookie 记忆的 fetch（模拟浏览器会话） */
 function makeFetch() {
@@ -71,7 +83,7 @@ function makeFetch() {
   };
 }
 
-console.log('\n=== NavBox 后台「设置」页 UI 测试 ===\n目标服务: ' + BASE + '\n');
+console.log('\n=== NavBox 后台 UI 测试 ===\n目标服务: ' + BASE + '\n');
 
 // 构造运行真实前端脚本的 DOM（与 index.html 的加载顺序一致）
 let html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
@@ -120,28 +132,69 @@ try {
   await window.NavBoxAdmin.reload();
   await sleep(400);
 
-  // 打开设置标签页
-  doc.querySelector('#adminTabs [data-tab="settings"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-  ok('设置标签页已渲染', await waitFor(() => doc.querySelector('#sizePrev'), 6000));
-  ok('分组排序列表已渲染', doc.querySelectorAll('#gsList .list-item').length > 0,
-    'rows=' + doc.querySelectorAll('#gsList .list-item').length);
-  ok('批量可见性列表已渲染', doc.querySelectorAll('#bvList .check-row').length > 0,
-    'rows=' + doc.querySelectorAll('#bvList .check-row').length);
-  ok('尺寸预设按钮 4 个', doc.querySelectorAll('#sizePresets [data-size-preset]').length === 4);
-  ok('死链检测按钮存在', !!doc.querySelector('#lcStart'));
+  // ---------------- 外观：书签大小 + 背景 ----------------
+  doc.querySelector('#adminTabs [data-tab="style"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  ok('外观标签页已渲染', await waitFor(() => doc.querySelector('#sizePrev') && doc.querySelector('#bgType'), 6000));
 
-  // 书签大小预设
+  // 书签大小：预设 + 实时 CSS 变量
   doc.querySelector('[data-size-preset="compact"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-  await sleep(120);
+  await sleep(150);
   ok('紧凑预设写入滑杆',
     doc.querySelector('#szMinW').value === '140' && doc.querySelector('#szIcon').value === '30',
     doc.querySelector('#szMinW').value + '/' + doc.querySelector('#szIcon').value);
   ok('紧凑预设实时注入前台 CSS 变量',
     doc.documentElement.style.getPropertyValue('--card-icon').trim() === '30px',
     doc.documentElement.style.getPropertyValue('--card-icon'));
-  ok('预览卡片已生成', !!doc.querySelector('#sizePrev .sp-card'));
+  ok('书签大小预览卡片已生成', !!doc.querySelector('#sizePrev .sp-card'));
 
-  // 批量可见性：勾选测试书签 → 设为私密
+  // 背景：外链图片
+  doc.querySelector('#bgType').value = 'url';
+  doc.querySelector('#bgType').dispatchEvent(new window.Event('change', { bubbles: true }));
+  const bgUrl = 'https://example.com/bg-test.jpg';
+  doc.querySelector('#bgUrl').value = bgUrl;
+  doc.querySelector('#bgUrl').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await sleep(500);
+  const layer = doc.querySelector('#bgLayer');
+  ok('外链背景实时显示到前台', String(layer.style.backgroundImage).indexOf('bg-test.jpg') > -1,
+    layer.style.backgroundImage);
+  ok('外链背景预览区生效', String(doc.querySelector('#bgPreview').style.backgroundImage).indexOf('bg-test.jpg') > -1,
+    doc.querySelector('#bgPreview').style.backgroundImage);
+
+  doc.querySelector('#saveStyle').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const bsUrl = await waitBootstrap(j =>
+    j.settings && j.settings.background && j.settings.background.type === 'url' && j.settings.background.url === bgUrl);
+  ok('外链背景已保存并通过前台接口返回', !!bsUrl);
+  ok('保存后前台背景图仍存在', String(doc.querySelector('#bgLayer').style.backgroundImage).indexOf('bg-test.jpg') > -1,
+    doc.querySelector('#bgLayer').style.backgroundImage);
+
+  // 背景：上传图片（存 KV）
+  const tiny = 'data:image/png;base64,' + 'A'.repeat(4000);
+  const uploaded = await window.fetch(BASE + '/api/admin/background', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl: tiny })
+  });
+  ok('通过接口上传背景图到 KV', uploaded.status === 200);
+  await window.NavBoxAdmin.reload();
+  await waitFor(() => doc.querySelector('#bgType'), 6000);
+  doc.querySelector('#bgType').value = 'upload';
+  doc.querySelector('#bgType').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await sleep(250);
+  doc.querySelector('#saveStyle').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const bsUp = await waitBootstrap(j =>
+    j.settings && j.settings.background && j.settings.background.type === 'upload' &&
+    j.background && String(j.background.dataUrl || '').indexOf('data:image/png;base64,') === 0);
+  ok('上传背景类型与图片已持久化', !!bsUp);
+  ok('上传背景实时显示到前台',
+    String(doc.querySelector('#bgLayer').style.backgroundImage).indexOf('data:image/png;base64,') > -1,
+    String(doc.querySelector('#bgLayer').style.backgroundImage).slice(0, 60));
+
+  // ---------------- 私密设置：批量可见性 ----------------
+  doc.querySelector('#adminTabs [data-tab="privacy"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  ok('私密设置标签页已渲染', await waitFor(() => doc.querySelector('#bvList'), 6000));
+  ok('私密设置页不含死链 / 分组排序 / 尺寸控件',
+    !doc.querySelector('#lcStart') && !doc.querySelector('#gsList') && !doc.querySelector('#sizePrev'));
+
   await sleep(300);
   const target = [...doc.querySelectorAll('#bvList .check-row')]
     .find(r => (r.textContent || '').indexOf('UI测试书签') > -1);
@@ -177,17 +230,33 @@ try {
   console.error('\n❌ 测试执行异常：', e);
   fail++;
 } finally {
-  // 清理测试书签
-  if (testId) {
-    try {
+  // 清理测试书签与背景，恢复默认设置
+  try {
+    if (testId) {
       await window.fetch(BASE + '/api/admin/link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete', ids: [testId] })
       });
       console.log('  ✅ 已清理 UI 测试书签');
-    } catch (e) { /* 忽略 */ }
-  }
+    }
+    await window.fetch(BASE + '/api/admin/background', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete' })
+    });
+    await window.fetch(BASE + '/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        settings: {
+          background: { type: 'gradient', url: '', blur: 0, brightness: 100, overlay: 30, gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' },
+          layout: { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 }
+        }
+      })
+    });
+    console.log('  ✅ 已恢复默认背景与书签尺寸');
+  } catch (e) { /* 忽略清理失败 */ }
   console.log('\n' + '='.repeat(46));
   console.log('  通过：' + pass + '    失败：' + fail + '    总计：' + (pass + fail));
   console.log('='.repeat(46) + '\n');

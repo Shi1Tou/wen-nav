@@ -85,13 +85,8 @@ const K = {
   backupLog: 'navbox_backup_log',
   loginFail: 'navbox_login_fail',
   cronToken: 'navbox_cron_token',
-  linkCheck: 'navbox_linkcheck',
   meta: 'navbox_meta'
 };
-
-/* 死链检测：单次请求最多检测的链接数（受 Edge Function 执行时长限制） */
-const LINKCHECK_MAX_BATCH = 10;
-const LINKCHECK_TIMEOUT_MS = 6000;
 
 /* ------------------------------------------------------------------ *
  * 基础工具
@@ -822,8 +817,6 @@ async function applyImport(kv, data, mode) {
       const links = inLinks.map((l, i) => normalizeLink({ ...l, order: i + 1 }, {}));
       await writeJSON(kv, K.groups, groups);
       await writeJSON(kv, K.links, links);
-      // 链接已被整体替换，旧的死链检测结果不再可信，一并清除
-      try { await kv.delete(K.linkCheck); } catch (e) { /* 忽略 */ }
       if (data.settings && typeof data.settings === 'object') {
         const merged = mergeSettings(data.settings);
         merged.updatedAt = nowIso();
@@ -946,125 +939,6 @@ function htmlResponse(text, filename) {
       'Content-Disposition': `attachment; filename="${filename}"`
     }
   });
-}
-
-/* ------------------------------------------------------------------ *
- * 死链检测
- *    由后台「设置 → 死链检测」调用。受平台执行时长限制，单次最多检测
- *    LINKCHECK_MAX_BATCH 条，前端会分批调用。
- *    安全：仅允许 http/https，且拒绝内网 / 环回 / 元数据地址（SSRF 防护）。
- * ------------------------------------------------------------------ */
-
-function isPrivateIpv4(h) {
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const a = +m[1], b = +m[2];
-  if ([a, +m[3], +m[4], b].some(n => n > 255)) return true;
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 169 && b === 254) return true;            // link-local / 云元数据
-  if (a === 172 && b >= 16 && b <= 31) return true;   // 私有网段
-  if (a === 192 && b === 168) return true;            // 私有网段
-  if (a === 100 && b >= 64 && b <= 127) return true;  // CGNAT
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  if (a >= 224) return true;                          // 组播 / 保留
-  return false;
-}
-
-function isBlockedProbeHost(hostname) {
-  let h = String(hostname || '').toLowerCase().trim();
-  if (!h) return true;
-  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
-  if (h === 'localhost' || /\.(localhost|local|internal|lan|home\.arpa|intranet)$/.test(h)) return true;
-  if (isPrivateIpv4(h)) return true;
-  if (h.indexOf(':') > -1) {
-    // IPv4-mapped / IPv4-compatible IPv6，例如 ::ffff:127.0.0.1
-    if (h.indexOf('.') > -1) {
-      const tail = h.slice(h.lastIndexOf(':') + 1);
-      if (isPrivateIpv4(tail)) return true;
-    }
-    if (h === '::' || h === '::1' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h)) return true;
-    return false;
-  }
-  // 单标签主机名（无点）一律视为内网
-  if (h.indexOf('.') === -1) return true;
-  return false;
-}
-
-const PROBE_UA = 'Mozilla/5.0 (compatible; NavBox-LinkChecker/1.0; +https://edgeone.ai/pages)';
-
-async function probeLink(rawUrl) {
-  const started = Date.now();
-  let url;
-  try {
-    url = new URL(String(rawUrl || '').trim());
-  } catch (e) {
-    return { state: 'invalid', status: 0, ms: 0, error: '网址格式不正确' };
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { state: 'invalid', status: 0, ms: 0, error: '仅支持 http/https 网址' };
-  }
-  if (isBlockedProbeHost(url.hostname)) {
-    return { state: 'blocked', status: 0, ms: 0, error: '内网 / 本地地址不参与检测' };
-  }
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) { /* 忽略 */ } }, LINKCHECK_TIMEOUT_MS);
-  const opts = {
-    // 跟随 301/302/307 等跳转，避免把「http 跳 https」这类正常站点误判为死链。
-    // 内网防护在 probeLink 入口已对初始主机名校验（管理端专用功能，风险可控）。
-    redirect: 'follow',
-    signal: ctrl.signal,
-    headers: { 'User-Agent': PROBE_UA, Accept: '*/*' }
-  };
-  try {
-    let res = await fetch(url.toString(), { ...opts, method: 'HEAD' });
-    // 部分站点不支持 / 拒绝 HEAD，退回带 Range 的 GET（只取前 2KB）
-    if ([400, 403, 405, 501].includes(res.status)) {
-      res = await fetch(url.toString(), {
-        ...opts,
-        method: 'GET',
-        headers: { ...opts.headers, Accept: 'text/html,*/*', Range: 'bytes=0-2047' }
-      });
-      try { if (res.body && typeof res.body.cancel === 'function') await res.body.cancel(); } catch (e) { /* 忽略 */ }
-    }
-    const status = res.status;
-    const ms = Date.now() - started;
-    if (status >= 200 && status < 400) return { state: 'alive', status, ms };
-    if (status === 401 || status === 403 || status === 429) {
-      return { state: 'blocked', status, ms, error: '需要登录 / 拒绝访问 / 触发限流' };
-    }
-    if (status === 404 || status === 410) return { state: 'dead', status, ms, error: '页面不存在（HTTP ' + status + '）' };
-    if (status >= 500) return { state: 'error', status, ms, error: '服务器错误（HTTP ' + status + '）' };
-    return { state: 'dead', status, ms, error: 'HTTP ' + status };
-  } catch (e) {
-    const msg = String(e && e.message || e);
-    const cause = e && e.cause && (e.cause.code || e.cause.message);
-    const detail = cause ? (msg + '（' + cause + '）') : msg;
-    const aborted = (e && e.name === 'AbortError') || /abort/i.test(msg);
-    return {
-      state: 'dead',
-      status: 0,
-      ms: Date.now() - started,
-      // 域名不存在 / 连接失败 / 证书错误都会走到这里；对导航站而言均视为不可达
-      error: aborted ? ('请求超时（' + (LINKCHECK_TIMEOUT_MS / 1000) + ' 秒）') : ('无法访问：' + detail.slice(0, 120))
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function summarizeLinkCheck(items) {
-  const count = state => items.filter(x => x.state === state).length;
-  return {
-    at: nowIso(),
-    total: items.length,
-    alive: count('alive'),
-    dead: count('dead'),
-    blocked: count('blocked'),
-    error: count('error'),
-    invalid: count('invalid'),
-    items
-  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -1268,15 +1142,14 @@ async function handle(path, method, request, context) {
         const auth = await getAuth(request, kv);
         if (!auth.admin) return withCors(err('未登录或会话已过期', 401));
         await ensureSeed(kv);
-        const [settings, groups, links, background, webdav, log, admin, linkCheck] = await Promise.all([
+        const [settings, groups, links, background, webdav, log, admin] = await Promise.all([
           readJSON(kv, K.settings, defaultSettings()),
           readJSON(kv, K.groups, []),
           readJSON(kv, K.links, []),
           readJSON(kv, K.background, null),
           readJSON(kv, K.webdav, null),
           readJSON(kv, K.backupLog, []),
-          ensureAdmin(kv),
-          readJSON(kv, K.linkCheck, null)
+          ensureAdmin(kv)
         ]);
         return withCors(json({
           ok: true,
@@ -1291,7 +1164,6 @@ async function handle(path, method, request, context) {
             lastBackupAt: webdav.lastBackupAt || null, lastBackupTarget: webdav.lastBackupTarget || null
           } : null,
           backupLog: log || [],
-          linkCheck: linkCheck || null,
           account: { username: admin.username, isDefault: !!admin.isDefault, updatedAt: admin.updatedAt || null }
         }));
       }
@@ -1374,58 +1246,6 @@ async function handle(path, method, request, context) {
           await writeJSON(kv, K.links, links);
           return withCors(json({ ok: true, links: sortLinks(links) }));
         }
-        return withCors(err('未知操作', 400));
-      }
-
-      /* ---------------- 管理端：死链检测 ---------------- */
-      case 'api/admin/linkcheck': {
-        const auth = await getAuth(request, kv);
-        if (!auth.admin) return withCors(err('未登录或会话已过期', 401));
-
-        // GET：读取上一次检测结果
-        if (method === 'GET') {
-          const saved = await readJSON(kv, K.linkCheck, null);
-          return withCors(json({ ok: true, linkCheck: saved || null, batchLimit: LINKCHECK_MAX_BATCH }));
-        }
-        if (method !== 'POST') return withCors(err('仅支持 GET / POST', 405));
-
-        const body = await readBody(request);
-        const action = body.action || 'check';
-
-        // 保存一次完整检测结果（前端全部批次跑完后调用）
-        if (action === 'save') {
-          const raw = Array.isArray(body.items) ? body.items.slice(0, 500) : [];
-          const items = raw.map(x => ({
-            id: String(x.id || '').slice(0, 80),
-            title: String(x.title || '').slice(0, 80),
-            url: String(x.url || '').slice(0, 2000),
-            state: ['alive', 'dead', 'blocked', 'error', 'invalid'].includes(x.state) ? x.state : 'error',
-            status: Number(x.status) || 0,
-            error: String(x.error || '').slice(0, 160),
-            ms: Math.max(0, Number(x.ms) || 0)
-          }));
-          const summary = summarizeLinkCheck(items);
-          await writeJSON(kv, K.linkCheck, summary);
-          return withCors(json({ ok: true, linkCheck: summary }));
-        }
-
-        // 检测一批网址
-        if (action === 'check') {
-          const list = Array.isArray(body.links) ? body.links.slice(0, LINKCHECK_MAX_BATCH) : [];
-          if (!list.length) return withCors(err('请提供待检测的书签', 400));
-          if (list.length > LINKCHECK_MAX_BATCH) {
-            return withCors(err('单次最多检测 ' + LINKCHECK_MAX_BATCH + ' 条书签', 400));
-          }
-          const results = await Promise.all(list.map(async item => {
-            const id = String(item.id || '').slice(0, 80);
-            const title = String(item.title || '').slice(0, 80);
-            const url = String(item.url || '').slice(0, 2000);
-            const r = await probeLink(url);
-            return { id, title, url, ...r };
-          }));
-          return withCors(json({ ok: true, results, batchLimit: LINKCHECK_MAX_BATCH }));
-        }
-
         return withCors(err('未知操作', 400));
       }
 

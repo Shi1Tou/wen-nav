@@ -1,6 +1,6 @@
 /* ============================================================
  * NavBox 管理后台
- * 登录 / 书签管理 / 分组排序 / 外观背景 / 导入导出 / WebDAV 备份 / 账号设置
+ * 登录 / 书签管理 / 分组排序 / 私密设置 / 外观背景 / 导入导出 / WebDAV 备份 / 账号设置
  * ============================================================ */
 (function () {
   'use strict';
@@ -17,8 +17,7 @@
     background: '/api/admin/background',
     importData: '/api/admin/import',
     exportData: '/api/export',
-    webdav: '/api/admin/webdav',
-    linkCheck: '/api/admin/linkcheck'
+    webdav: '/api/admin/webdav'
   };
 
   /* ---------------- 状态 ---------------- */
@@ -310,7 +309,7 @@
   const TABS = [
     { id: 'links', name: '书签', ico: '🔖' },
     { id: 'groups', name: '分组', ico: '🗂️' },
-    { id: 'settings', name: '设置', ico: '🧰' },
+    { id: 'privacy', name: '私密设置', ico: '🔒' },
     { id: 'style', name: '外观', ico: '🎨' },
     { id: 'transfer', name: '导入导出', ico: '🔄' },
     { id: 'backup', name: '备份', ico: '☁️' },
@@ -344,7 +343,7 @@
     switch (id) {
       case 'links': renderLinksTab(); break;
       case 'groups': renderGroupsTab(); break;
-      case 'settings': renderSettingsTab(); break;
+      case 'privacy': renderPrivacyTab(); break;
       case 'style': renderStyleTab(); break;
       case 'transfer': renderTransferTab(); break;
       case 'backup': renderBackupTab(); break;
@@ -983,100 +982,34 @@
   }
 
   /* ============================================================
-   * 标签页：设置（死链检测 / 分组排序 / 批量可见性 / 书签大小）
+   * 标签页：私密设置（批量设置书签可见性）
    * ============================================================ */
-  function renderSettingsTab() {
+  function renderPrivacyTab() {
     const d = S.data;
     if (!d) return;
 
     const groups = () => (S.data.groups || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
     const gname = id => { const g = (S.data.groups || []).find(x => x.id === id); return g ? g.name : '未分组'; };
 
-    const STATE_LABEL = { alive: '正常', dead: '死链', blocked: '受限', error: '错误', invalid: '无效' };
-    const STATE_PILL = { alive: 'ok', dead: 'dead', blocked: 'warn', error: 'err', invalid: 'gray' };
-    const STATE_ORDER = { dead: 0, error: 1, invalid: 2, blocked: 3, alive: 4 };
-
-    const layout0 = (d.settings && d.settings.layout) || {};
-    const SIZE_DEFAULTS = { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 };
-    const sizeNum = k => {
-      const v = Number(layout0[k]);
-      return (layout0[k] != null && layout0[k] !== '' && isFinite(v)) ? v : SIZE_DEFAULTS[k];
-    };
-
     const panel = document.createElement('div');
     panel.className = 'tab-panel';
     panel.innerHTML =
-      '<div class="section-head-bar"><h3>🧰 设置</h3><div class="spacer"></div>' +
+      '<div class="section-head-bar"><h3>🔒 私密设置</h3><div class="spacer"></div>' +
         '<span class="badge badge-gray" id="setCount">' + (d.links || []).length + ' 个书签 · ' +
         (d.groups || []).length + ' 个分组</span>' +
       '</div>' +
 
-      /* ---------- 1. 死链检测 ---------- */
-      '<div class="section-card">' +
-        '<h3><span class="h-ico">🩺</span>死链检测</h3>' +
-        '<div class="notice info" style="font-size:12px">' +
-          '由服务器逐条请求书签地址（先 HEAD，不支持时回退 GET），每批最多 <b>10</b> 条、单条超时 <b>6 秒</b>。' +
-          '返回 <code>401/403/429</code> 通常只是站点拒绝程序访问，会标记为「受限」而不是死链；' +
-          '内网 / 本地地址出于安全考虑不参与检测。' +
-        '</div>' +
-        '<div class="stat-grid">' +
-          '<div class="stat-card"><div class="num" id="lcNumTotal">0</div><div class="lbl">已检测</div></div>' +
-          '<div class="stat-card"><div class="num" id="lcNumAlive" style="color:#12917a">0</div><div class="lbl">正常</div></div>' +
-          '<div class="stat-card"><div class="num" id="lcNumDead" style="color:#c23b32">0</div><div class="lbl">死链</div></div>' +
-          '<div class="stat-card"><div class="num" id="lcNumBlocked" style="color:#9a6410">0</div><div class="lbl">受限 / 错误</div></div>' +
-        '</div>' +
-        '<div class="row-inline" style="margin-bottom:12px">' +
-          '<div class="field" style="flex:1 1 180px;min-width:150px"><label>检测范围</label>' +
-            '<select class="select" id="lcScope">' +
-              '<option value="all">全部书签</option>' +
-              '<option value="public">仅公开书签</option>' +
-              '<option value="private">仅私密书签</option>' +
-            '</select></div>' +
-          '<div class="field" style="flex:0 0 auto"><label>&nbsp;</label>' +
-            '<div class="btn-group" style="margin:0">' +
-              '<button class="btn btn-primary btn-sm" id="lcStart" type="button">开始检测</button>' +
-              '<button class="btn btn-ghost btn-sm" id="lcStop" type="button" disabled>停止</button>' +
-            '</div></div>' +
-        '</div>' +
-        '<div id="lcProgressWrap" style="display:none;margin-bottom:12px">' +
-          '<div class="progress"><i id="lcProgressBar"></i></div>' +
-          '<div class="field-hint" id="lcProgressText"></div>' +
-        '</div>' +
-        '<div class="list-toolbar" style="margin-bottom:8px">' +
-          '<div class="seg" id="lcFilter">' +
-            '<button class="seg-btn active" type="button" data-lc-filter="all">全部</button>' +
-            '<button class="seg-btn" type="button" data-lc-filter="dead">死链</button>' +
-            '<button class="seg-btn" type="button" data-lc-filter="blocked">受限</button>' +
-            '<button class="seg-btn" type="button" data-lc-filter="alive">正常</button>' +
-          '</div>' +
-          '<div class="spacer"></div>' +
-          '<button class="btn btn-ghost btn-sm" id="lcSelectDead" type="button">全选死链</button>' +
-          '<button class="btn btn-danger btn-sm" id="lcDel" type="button">删除选中</button>' +
-        '</div>' +
-        '<div id="lcList" class="bulk-list"></div>' +
-        '<div class="field-hint" id="lcSavedAt"></div>' +
-      '</div>' +
-
-      /* ---------- 2. 分组排序 ---------- */
-      '<div class="section-card">' +
-        '<h3><span class="h-ico">🗂️</span>分组排序调整</h3>' +
-        '<div class="notice info" style="font-size:12px">' +
-          '前台按这里的顺序展示分组。拖动 ⠿、点 ↑↓ 或置顶 / 置底都会<b>立即保存</b>；也可以用下面的预设一键重排。' +
-        '</div>' +
-        '<div class="btn-group" style="margin-bottom:12px">' +
-          '<button class="btn btn-ghost btn-sm" id="gsByName" type="button">按名称 A→Z</button>' +
-          '<button class="btn btn-ghost btn-sm" id="gsByCount" type="button">按书签数从多到少</button>' +
-          '<button class="btn btn-ghost btn-sm" id="gsRenumber" type="button">按当前顺序重新编号</button>' +
-        '</div>' +
-        '<div class="data-list" id="gsList"></div>' +
-      '</div>' +
-
-      /* ---------- 3. 私密 / 公开批量设置 ---------- */
+      /* ---------- 私密 / 公开批量设置 ---------- */
       '<div class="section-card">' +
         '<h3><span class="h-ico">🔐</span>私密 / 公开批量设置</h3>' +
         '<div class="notice info" style="font-size:12px">' +
           '勾选书签后一键设为私密或公开。私密书签只对已登录管理员可见，' +
           '未登录访客从 <code>/api/bootstrap</code> 拿不到数据，不依赖前端隐藏。' +
+        '</div>' +
+        '<div class="stat-grid">' +
+          '<div class="stat-card"><div class="num" id="bvNumAll">0</div><div class="lbl">书签总数</div></div>' +
+          '<div class="stat-card"><div class="num" id="bvNumPub" style="color:#12917a">0</div><div class="lbl">公开</div></div>' +
+          '<div class="stat-card"><div class="num" id="bvNumPriv" style="color:#c2521a">0</div><div class="lbl">私密</div></div>' +
         '</div>' +
         '<div class="list-toolbar">' +
           '<input class="search-mini" id="bvFilter" placeholder="筛选标题 / 网址 / 描述…">' +
@@ -1097,358 +1030,13 @@
           '<button class="btn btn-soft btn-sm" id="bvPrivate" type="button">设为私密</button>' +
         '</div>' +
         '<div id="bvList" class="bulk-list"></div>' +
-      '</div>' +
-
-      /* ---------- 4. 书签大小 ---------- */
-      '<div class="section-card">' +
-        '<h3><span class="h-ico">📏</span>书签大小调整</h3>' +
-        '<div class="notice info" style="font-size:12px">' +
-          '拖动滑杆可实时预览到前台页面（只重算样式，不会重新加载图标）。满意后点「保存大小设置」。' +
-        '</div>' +
-        '<div class="btn-group" style="margin-bottom:14px" id="sizePresets">' +
-          '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="compact">紧凑</button>' +
-          '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="standard">标准</button>' +
-          '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="large">大</button>' +
-          '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="xlarge">超大</button>' +
-        '</div>' +
-        '<div class="size-preview" id="sizePrev"></div>' +
-        '<div class="row2">' +
-          '<div class="field"><label>卡片最小宽度</label>' +
-            '<div class="range-row"><input type="range" id="szMinW" min="110" max="420" step="2" value="' + sizeNum('minCardWidth') + '"><span class="range-val" id="vSzMinW"></span></div>' +
-            '<div class="field-hint">越小每行卡片越多。</div></div>' +
-          '<div class="field"><label>卡片间距</label>' +
-            '<div class="range-row"><input type="range" id="szGap" min="6" max="30" step="1" value="' + sizeNum('gridGap') + '"><span class="range-val" id="vSzGap"></span></div></div>' +
-        '</div>' +
-        '<div class="row2">' +
-          '<div class="field"><label>图标尺寸</label>' +
-            '<div class="range-row"><input type="range" id="szIcon" min="20" max="64" step="1" value="' + sizeNum('iconSize') + '"><span class="range-val" id="vSzIcon"></span></div></div>' +
-          '<div class="field"><label>卡片内边距</label>' +
-            '<div class="range-row"><input type="range" id="szPad" min="4" max="24" step="1" value="' + sizeNum('cardPadding') + '"><span class="range-val" id="vSzPad"></span></div></div>' +
-        '</div>' +
-        '<div class="row2">' +
-          '<div class="field"><label>标题字号</label>' +
-            '<div class="range-row"><input type="range" id="szTitle" min="10" max="22" step="0.5" value="' + sizeNum('titleSize') + '"><span class="range-val" id="vSzTitle"></span></div></div>' +
-          '<div class="field"><label>描述字号</label>' +
-            '<div class="range-row"><input type="range" id="szDesc" min="9" max="18" step="0.5" value="' + sizeNum('descSize') + '"><span class="range-val" id="vSzDesc"></span></div></div>' +
-        '</div>' +
-        '<div class="btn-group">' +
-          '<button class="btn btn-primary btn-sm" id="szSave" type="button">保存大小设置</button>' +
-          '<button class="btn btn-ghost btn-sm" id="szReset" type="button">恢复标准尺寸</button>' +
-        '</div>' +
       '</div>';
 
     $('#tabHost').innerHTML = '';
     $('#tabHost').appendChild(panel);
 
     /* ============================================================
-     * 1. 死链检测
-     * ============================================================ */
-    let lcResults = (d.linkCheck && Array.isArray(d.linkCheck.items)) ? d.linkCheck.items.slice() : [];
-    let lcFilter = 'all';
-    let lcRunning = false;
-    let lcAbort = false;
-    const lcSelected = new Set();
-    const lcKey = x => (x && (x.id || x.url)) || '';
-
-    function lcUpdateStats() {
-      const count = s => lcResults.filter(x => x.state === s).length;
-      $('#lcNumTotal').textContent = lcResults.length;
-      $('#lcNumAlive').textContent = count('alive');
-      $('#lcNumDead').textContent = count('dead');
-      $('#lcNumBlocked').textContent = count('blocked') + count('error') + count('invalid');
-      const savedAt = (S.data.linkCheck && S.data.linkCheck.at) || null;
-      $('#lcSavedAt').textContent = savedAt ? ('上次检测完成：' + fmtTime(savedAt) +
-        '（共 ' + (S.data.linkCheck.total || 0) + ' 条）') : '还没有检测记录，点「开始检测」运行一次。';
-    }
-
-    function lcVisible() {
-      const list = lcResults.slice().sort((a, b) => {
-        const sa = STATE_ORDER[a.state] == null ? 5 : STATE_ORDER[a.state];
-        const sb = STATE_ORDER[b.state] == null ? 5 : STATE_ORDER[b.state];
-        return sa - sb;
-      });
-      if (lcFilter === 'all') return list;
-      if (lcFilter === 'blocked') return list.filter(x => x.state === 'blocked' || x.state === 'error' || x.state === 'invalid');
-      return list.filter(x => x.state === lcFilter);
-    }
-
-    function lcDraw() {
-      const host = $('#lcList');
-      const items = lcVisible();
-      if (!items.length) {
-        host.innerHTML = '<div class="empty-list">' +
-          (lcResults.length ? '当前筛选下没有记录' : '暂无检测结果') + '</div>';
-        return;
-      }
-      host.innerHTML = items.map(x => {
-        const key = lcKey(x);
-        const st = x.state || 'error';
-        return '<label class="check-row">' +
-          '<input type="checkbox" data-lc-key="' + esc(key) + '"' + (lcSelected.has(key) ? ' checked' : '') + '>' +
-          '<span class="pill ' + (STATE_PILL[st] || 'gray') + '">' + esc(STATE_LABEL[st] || st) + '</span>' +
-          '<div class="cr-main"><div class="cr-title">' + esc(x.title || x.url || '（已删除）') + '</div>' +
-            '<div class="cr-url">' + esc(x.url || '') + '</div>' +
-            (x.error ? '<div class="cr-err">' + esc(x.error) + '</div>' : '') + '</div>' +
-          '<span class="cr-status">' + (x.status ? 'HTTP ' + x.status : '') +
-            (x.ms ? '<br><span style="color:#9aa1b3">' + x.ms + 'ms</span>' : '') + '</span>' +
-        '</label>';
-      }).join('');
-    }
-
-    function lcProgress(done, total) {
-      const pct = total ? Math.round(done / total * 100) : 0;
-      $('#lcProgressWrap').style.display = '';
-      $('#lcProgressBar').style.width = pct + '%';
-      $('#lcProgressText').textContent = '检测中… ' + done + ' / ' + total + '（' + pct + '%）';
-    }
-
-    async function lcRun() {
-      if (lcRunning) return;
-      const scope = $('#lcScope').value;
-      const targets = (S.data.links || [])
-        .slice()
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-        .filter(l => scope === 'all' ? true : l.visibility === scope);
-      if (!targets.length) { toast('当前范围内没有可检测的书签', 'err'); return; }
-      if (targets.length > 500) {
-        toast('单次最多检测 500 条，已按顺序取前 500 条', 'warn', 4000);
-        targets.length = 500;
-      }
-      lcRunning = true;
-      lcAbort = false;
-      lcResults = [];
-      lcSelected.clear();
-      $('#lcStart').disabled = true;
-      $('#lcScope').disabled = true;
-      $('#lcStop').disabled = false;
-      lcDraw();
-      lcUpdateStats();
-
-      const BATCH = 8;
-      let done = 0;
-      for (let i = 0; i < targets.length; i += BATCH) {
-        if (lcAbort) break;
-        const batch = targets.slice(i, i + BATCH);
-        try {
-          const res = await api(API.linkCheck, {
-            method: 'POST',
-            body: {
-              action: 'check',
-              links: batch.map(l => ({ id: l.id, title: l.title, url: l.url }))
-            }
-          });
-          lcResults = lcResults.concat((res && res.results) || []);
-        } catch (e) {
-          lcResults = lcResults.concat(batch.map(l => ({
-            id: l.id, title: l.title, url: l.url,
-            state: 'error', status: 0, error: e.message || '检测失败', ms: 0
-          })));
-        }
-        done += batch.length;
-        lcProgress(done, targets.length);
-        lcDraw();
-        lcUpdateStats();
-      }
-
-      lcRunning = false;
-      $('#lcStart').disabled = false;
-      $('#lcScope').disabled = false;
-      $('#lcStop').disabled = true;
-      $('#lcProgressText').textContent = (lcAbort ? '已停止' : '检测完成') +
-        '：共 ' + lcResults.length + ' 条；单条最长耗时约 ' + Math.max(1, Math.round(
-          lcResults.reduce((s, x) => Math.max(s, Number(x.ms) || 0), 0) / 1000)) + ' 秒。';
-
-      // 保存结果，供下次打开后台时回显
-      try {
-        const saved = await api(API.linkCheck, { method: 'POST', body: { action: 'save', items: lcResults } });
-        S.data.linkCheck = saved.linkCheck;
-      } catch (e) {
-        toast('检测结果保存失败：' + e.message, 'err', 4200);
-      }
-      lcDraw();
-      lcUpdateStats();
-      const dead = lcResults.filter(x => x.state === 'dead').length;
-      toast('检测完成：死链 ' + dead + ' 条 / 共 ' + lcResults.length + ' 条', dead ? 'warn' : 'ok', 3600);
-    }
-
-    async function lcDeleteSelected() {
-      const ids = Array.from(lcSelected).filter(k => (S.data.links || []).some(l => l.id === k));
-      if (!ids.length) { toast('请先勾选要删除的书签', 'err'); return; }
-      if (!confirmBox('确定删除选中的 ' + ids.length + ' 个书签？此操作不可撤销。')) return;
-      try {
-        const res = await api(API.link, { method: 'POST', body: { action: 'delete', ids: ids } });
-        S.data.links = (S.data.links || []).filter(l => ids.indexOf(l.id) === -1);
-        lcResults = lcResults.filter(x => ids.indexOf(x.id) === -1);
-        ids.forEach(id => lcSelected.delete(id));
-        lcDraw();
-        lcUpdateStats();
-        $('#setCount').textContent = (S.data.links || []).length + ' 个书签 · ' + (S.data.groups || []).length + ' 个分组';
-        bvDraw();
-        syncFront();
-        toast('已删除 ' + ((res && res.deleted) || ids.length) + ' 个书签', 'ok', 2400);
-      } catch (e) {
-        toast('删除失败：' + e.message, 'err');
-      }
-    }
-
-    $('#lcStart').addEventListener('click', withBusy($('#lcStart'), lcRun));
-    $('#lcStop').addEventListener('click', () => {
-      if (!lcRunning) return;
-      lcAbort = true;
-      $('#lcStop').disabled = true;
-      $('#lcProgressText').textContent = '正在停止…（等待当前批次返回）';
-    });
-    $('#lcList').addEventListener('change', e => {
-      const cb = e.target.closest('input[data-lc-key]');
-      if (!cb) return;
-      const key = cb.dataset.lcKey;
-      if (cb.checked) lcSelected.add(key); else lcSelected.delete(key);
-    });
-    $('#lcFilter').addEventListener('click', e => {
-      const b = e.target.closest('[data-lc-filter]');
-      if (!b) return;
-      lcFilter = b.dataset.lcFilter;
-      $$('#lcFilter .seg-btn').forEach(x => x.classList.toggle('active', x === b));
-      lcDraw();
-    });
-    $('#lcSelectDead').addEventListener('click', () => {
-      const dead = lcResults.filter(x => x.state === 'dead' || x.state === 'error');
-      if (!dead.length) { toast('没有可选择的死链', 'err'); return; }
-      dead.forEach(x => lcSelected.add(lcKey(x)));
-      lcDraw();
-      toast('已选中 ' + dead.length + ' 条死链 / 错误项', 'ok', 2200);
-    });
-    $('#lcDel').addEventListener('click', withBusy($('#lcDel'), lcDeleteSelected));
-
-    /* ============================================================
-     * 2. 分组排序调整
-     * ============================================================ */
-    let gsDragId = null;
-
-    function gsCount(gid) { return (S.data.links || []).filter(l => l.groupId === gid).length; }
-
-    function gsDraw() {
-      const host = $('#gsList');
-      const items = groups();
-      if (!items.length) {
-        host.innerHTML = '<div class="empty-list"><div class="big">🗂️</div>还没有分组</div>';
-        return;
-      }
-      host.innerHTML = '';
-      items.forEach((g, i) => {
-        const row = document.createElement('div');
-        row.className = 'list-item';
-        row.draggable = true;
-        row.dataset.id = g.id;
-
-        const grip = document.createElement('span');
-        grip.className = 'li-grip';
-        grip.textContent = '⠿';
-        grip.title = '拖动排序';
-        row.appendChild(grip);
-
-        const ico = document.createElement('div');
-        ico.className = 'li-icon';
-        ico.style.cssText = 'font-size:17px;background:#f7f8fc';
-        ico.textContent = g.icon || '📁';
-        row.appendChild(ico);
-
-        const main = document.createElement('div');
-        main.className = 'li-main';
-        main.innerHTML = '<div class="li-title">' + esc(g.name) + '</div>' +
-          '<div class="li-meta"><span class="badge badge-blue">' + gsCount(g.id) + ' 个书签</span>' +
-          '<span>第 ' + (i + 1) + ' 位</span></div>';
-        row.appendChild(main);
-
-        const acts = document.createElement('div');
-        acts.className = 'li-actions';
-        acts.innerHTML =
-          '<button class="mini-btn" data-move="top" type="button" title="置顶">⤒</button>' +
-          '<button class="mini-btn" data-move="up" type="button" title="上移">↑</button>' +
-          '<button class="mini-btn" data-move="down" type="button" title="下移">↓</button>' +
-          '<button class="mini-btn" data-move="bottom" type="button" title="置底">⤓</button>';
-        row.appendChild(acts);
-
-        acts.addEventListener('click', e => {
-          const b = e.target.closest('button[data-move]');
-          if (!b) return;
-          const list = groups();
-          const idx = list.findIndex(x => x.id === g.id);
-          if (idx < 0) return;
-          let target = idx;
-          const mv = b.dataset.move;
-          if (mv === 'up') target = idx - 1;
-          else if (mv === 'down') target = idx + 1;
-          else if (mv === 'top') target = 0;
-          else if (mv === 'bottom') target = list.length - 1;
-          if (target === idx || target < 0 || target >= list.length) return;
-          const copy = list.slice();
-          const [m] = copy.splice(idx, 1);
-          copy.splice(target, 0, m);
-          gsPersist(copy);
-        });
-
-        row.addEventListener('dragstart', e => {
-          gsDragId = g.id;
-          row.classList.add('dragging');
-          e.dataTransfer.effectAllowed = 'move';
-          try { e.dataTransfer.setData('text/plain', g.id); } catch (err) {}
-        });
-        row.addEventListener('dragend', () => {
-          row.classList.remove('dragging');
-          $$('.list-item', host).forEach(x => x.classList.remove('drag-over'));
-        });
-        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('drag-over'); });
-        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
-        row.addEventListener('drop', e => {
-          e.preventDefault();
-          row.classList.remove('drag-over');
-          if (!gsDragId || gsDragId === g.id) return;
-          const list = groups();
-          const si = list.findIndex(x => x.id === gsDragId);
-          const di = list.findIndex(x => x.id === g.id);
-          if (si < 0 || di < 0) return;
-          const [m] = list.splice(si, 1);
-          list.splice(di, 0, m);
-          gsPersist(list);
-        });
-
-        host.appendChild(row);
-      });
-    }
-
-    async function gsPersist(ordered) {
-      const next = ordered.map((g, i) => ({ ...g, order: i + 1 }));
-      S.data.groups = next;
-      gsDraw();
-      if (window.NavBox && window.NavBox.patch) window.NavBox.patch({ groups: next });
-      try {
-        await api(API.group, {
-          method: 'POST',
-          body: { action: 'reorder', orders: next.map(g => ({ id: g.id, order: g.order })) }
-        });
-        toast('分组顺序已保存', 'ok', 1200);
-      } catch (e) {
-        toast('保存失败：' + e.message, 'err');
-        loadAdminData(true);
-      }
-    }
-
-    $('#gsByName').addEventListener('click', withBusy($('#gsByName'), async () => {
-      const list = groups().slice().sort((a, b) =>
-        String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN'));
-      await gsPersist(list);
-    }));
-    $('#gsByCount').addEventListener('click', withBusy($('#gsByCount'), async () => {
-      const list = groups().slice().sort((a, b) => gsCount(b.id) - gsCount(a.id));
-      await gsPersist(list);
-    }));
-    $('#gsRenumber').addEventListener('click', withBusy($('#gsRenumber'), async () => {
-      await gsPersist(groups());
-    }));
-
-    /* ============================================================
-     * 3. 私密 / 公开批量设置
+     * 私密 / 公开批量设置
      * ============================================================ */
     const bvSelected = new Set();
 
@@ -1492,7 +1080,13 @@
     }
 
     function bvUpdateCount() {
+      const all = S.data.links || [];
+      const priv = all.filter(l => l.visibility === 'private').length;
+      $('#bvNumAll').textContent = all.length;
+      $('#bvNumPub').textContent = all.length - priv;
+      $('#bvNumPriv').textContent = priv;
       $('#bvSelCount').textContent = '已选 ' + bvSelected.size + ' 个';
+      $('#setCount').textContent = all.length + ' 个书签 · ' + (S.data.groups || []).length + ' 个分组';
     }
 
     async function bvApply(vis) {
@@ -1539,100 +1133,9 @@
     $('#bvPublic').addEventListener('click', withBusy($('#bvPublic'), () => bvApply('public')));
     $('#bvPrivate').addEventListener('click', withBusy($('#bvPrivate'), () => bvApply('private')));
 
-    /* ============================================================
-     * 4. 书签大小调整
-     * ============================================================ */
-    const SIZE_PRESETS = {
-      compact: { minCardWidth: 140, gridGap: 10, iconSize: 30, cardPadding: 8, titleSize: 12.5, descSize: 10.5 },
-      standard: { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 },
-      large: { minCardWidth: 200, gridGap: 16, iconSize: 46, cardPadding: 14, titleSize: 15.5, descSize: 12.5 },
-      xlarge: { minCardWidth: 240, gridGap: 18, iconSize: 54, cardPadding: 16, titleSize: 17, descSize: 13.5 }
-    };
-
-    function sizeModel() {
-      return {
-        minCardWidth: Number($('#szMinW').value),
-        gridGap: Number($('#szGap').value),
-        iconSize: Number($('#szIcon').value),
-        cardPadding: Number($('#szPad').value),
-        titleSize: Number($('#szTitle').value),
-        descSize: Number($('#szDesc').value)
-      };
-    }
-
-    function sizeRefresh() {
-      const m = sizeModel();
-      $('#vSzMinW').textContent = m.minCardWidth + 'px';
-      $('#vSzGap').textContent = m.gridGap + 'px';
-      $('#vSzIcon').textContent = m.iconSize + 'px';
-      $('#vSzPad').textContent = m.cardPadding + 'px';
-      $('#vSzTitle').textContent = m.titleSize + 'px';
-      $('#vSzDesc').textContent = m.descSize + 'px';
-
-      $('#sizePrev').innerHTML =
-        '<div class="sp-card" style="display:flex;align-items:center;gap:' + (m.cardPadding * 0.9) + 'px;' +
-          'padding:' + m.cardPadding + 'px ' + (m.cardPadding + 1) + 'px;border-radius:12px;background:#fff;' +
-          'border:1px solid #e3e7f0;max-width:340px;min-height:' + (m.iconSize + m.cardPadding * 2) + 'px;' +
-          'box-shadow:0 3px 12px rgba(30,50,100,.08)">' +
-          '<div style="flex:0 0 ' + m.iconSize + 'px;width:' + m.iconSize + 'px;height:' + m.iconSize + 'px;' +
-            'border-radius:9px;background:linear-gradient(135deg,#5b8cff,#7c5bff);display:grid;place-items:center;' +
-            'color:#fff;font-weight:700;font-size:' + (m.iconSize * 0.42).toFixed(1) + 'px">N</div>' +
-          '<div style="min-width:0"><div style="font-size:' + m.titleSize + 'px;font-weight:650;' +
-            'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">示例书签</div>' +
-            '<div style="font-size:' + m.descSize + 'px;color:#8a92a6;white-space:nowrap;overflow:hidden;' +
-            'text-overflow:ellipsis">这是书签描述文字预览</div></div>' +
-        '</div>';
-
-      // 实时预览到前台（只重算 CSS 变量，不重建卡片）
-      if (window.NavBox && window.NavBox.patch) {
-        const live = JSON.parse(JSON.stringify(S.data.settings || {}));
-        live.layout = { ...(live.layout || {}), ...m };
-        window.NavBox.patch({ settings: live }, true);
-      }
-
-      $$('#sizePresets [data-size-preset]').forEach(b => {
-        const p = SIZE_PRESETS[b.dataset.sizePreset];
-        const same = p && Object.keys(p).every(k => Math.abs(Number(p[k]) - m[k]) < 0.001);
-        b.classList.toggle('active', !!same);
-      });
-    }
-
-    function sizeApplyPreset(name) {
-      const p = SIZE_PRESETS[name];
-      if (!p) return;
-      $('#szMinW').value = p.minCardWidth;
-      $('#szGap').value = p.gridGap;
-      $('#szIcon').value = p.iconSize;
-      $('#szPad').value = p.cardPadding;
-      $('#szTitle').value = p.titleSize;
-      $('#szDesc').value = p.descSize;
-      sizeRefresh();
-    }
-
-    ['#szMinW', '#szGap', '#szIcon', '#szPad', '#szTitle', '#szDesc'].forEach(sel => {
-      $(sel).addEventListener('input', sizeRefresh);
-    });
-    $$('#sizePresets [data-size-preset]').forEach(b => {
-      b.addEventListener('click', () => sizeApplyPreset(b.dataset.sizePreset));
-    });
-    $('#szReset').addEventListener('click', () => {
-      sizeApplyPreset('standard');
-      toast('已填入标准尺寸，点「保存大小设置」生效', 'ok', 2600);
-    });
-    $('#szSave').addEventListener('click', withBusy($('#szSave'), async () => {
-      const res = await api(API.settings, { method: 'POST', body: { settings: { layout: sizeModel() } } });
-      S.data.settings = res.settings;
-      syncFront();
-      toast('书签大小已保存', 'ok');
-    }));
-
     /* ---- 初始化 ---- */
-    lcDraw();
-    lcUpdateStats();
-    gsDraw();
     bvDraw();
     bvUpdateCount();
-    sizeRefresh();
   }
 
   /* ============================================================
@@ -1645,6 +1148,28 @@
     const bg = s.background || {};
     const card = s.card || {};
     const layout = s.layout || {};
+
+    const SIZE_DEFAULTS = { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 };
+    const SIZE_PRESETS = {
+      compact: { minCardWidth: 140, gridGap: 10, iconSize: 30, cardPadding: 8, titleSize: 12.5, descSize: 10.5 },
+      standard: { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 },
+      large: { minCardWidth: 200, gridGap: 16, iconSize: 46, cardPadding: 14, titleSize: 15.5, descSize: 12.5 },
+      xlarge: { minCardWidth: 240, gridGap: 18, iconSize: 54, cardPadding: 16, titleSize: 17, descSize: 13.5 }
+    };
+    function sizeNum(k) {
+      const v = Number(layout[k]);
+      return (layout[k] != null && layout[k] !== '' && isFinite(v)) ? v : SIZE_DEFAULTS[k];
+    }
+    function sizeValues() {
+      return {
+        minCardWidth: Number($('#szMinW').value),
+        gridGap: Number($('#szGap').value),
+        iconSize: Number($('#szIcon').value),
+        cardPadding: Number($('#szPad').value),
+        titleSize: Number($('#szTitle').value),
+        descSize: Number($('#szDesc').value)
+      };
+    }
 
     const gradients = [
       'linear-gradient(135deg,#667eea 0%,#764ba2 100%)',
@@ -1756,13 +1281,41 @@
         '</div>' +
         '<label class="switch"><input type="checkbox" id="cHover"' + (card.hoverScale !== false ? ' checked' : '') + '>' +
           '<span class="track"></span><span class="lbl">悬停时卡片轻微上浮放大</span></label>' +
+        '<hr class="divider">' +
+        '<div class="field"><label>书签大小预设</label>' +
+          '<div class="btn-group" id="sizePresets">' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="compact">紧凑</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="standard">标准</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="large">大</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-size-preset="xlarge">超大</button>' +
+          '</div>' +
+          '<div class="field-hint">预设会同时调整卡片宽度、间距、图标尺寸与字号；也可用下方滑杆逐项微调。</div>' +
+        '</div>' +
+        '<div class="size-preview" id="sizePrev"></div>' +
+        '<div class="row2">' +
+          '<div class="field"><label>卡片最小宽度</label>' +
+            '<div class="range-row"><input type="range" id="szMinW" min="110" max="420" step="2" value="' + sizeNum('minCardWidth') + '"><span class="range-val" id="vSzMinW"></span></div>' +
+            '<div class="field-hint">越小每行卡片越多。</div></div>' +
+          '<div class="field"><label>卡片间距</label>' +
+            '<div class="range-row"><input type="range" id="szGap" min="6" max="30" step="1" value="' + sizeNum('gridGap') + '"><span class="range-val" id="vSzGap"></span></div></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div class="field"><label>图标尺寸</label>' +
+            '<div class="range-row"><input type="range" id="szIcon" min="20" max="64" step="1" value="' + sizeNum('iconSize') + '"><span class="range-val" id="vSzIcon"></span></div></div>' +
+          '<div class="field"><label>卡片内边距</label>' +
+            '<div class="range-row"><input type="range" id="szPad" min="4" max="24" step="1" value="' + sizeNum('cardPadding') + '"><span class="range-val" id="vSzPad"></span></div></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div class="field"><label>标题字号</label>' +
+            '<div class="range-row"><input type="range" id="szTitle" min="10" max="22" step="0.5" value="' + sizeNum('titleSize') + '"><span class="range-val" id="vSzTitle"></span></div></div>' +
+          '<div class="field"><label>描述字号</label>' +
+            '<div class="range-row"><input type="range" id="szDesc" min="9" max="18" step="0.5" value="' + sizeNum('descSize') + '"><span class="range-val" id="vSzDesc"></span></div></div>' +
+        '</div>' +
+        '<div class="btn-group"><button class="btn btn-ghost btn-sm" type="button" id="szReset">恢复标准尺寸</button></div>' +
       '</div>' +
 
       /* --- 布局 --- */
       '<div class="section-card"><h3><span class="h-ico">📐</span>布局与搜索</h3>' +
-        '<div class="field"><label>桌面端卡片最小宽度 (px)</label>' +
-          '<div class="range-row"><input type="range" id="lMinW" min="110" max="420" step="2" value="' + (layout.minCardWidth || 168) + '"><span class="range-val" id="valMinW"></span></div>' +
-          '<div class="field-hint">越小每行卡片越多。手机端会自动使用更紧凑的宽度。</div></div>' +
         '<div class="field"><label>搜索框占位提示</label>' +
           '<input class="input" id="sSearchPh" maxlength="60" value="' + esc((s.search && s.search.placeholder) || '') + '"></div>' +
         '<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="lDesc"' + (layout.showDesc !== false ? ' checked' : '') + '>' +
@@ -1848,10 +1401,17 @@
       d.background = { dataUrl: S.uploadDataUrl, updatedAt: new Date().toISOString() };
       $('#bgType').value = 'upload';
       syncBgBoxes();
+      // 关键：把 background.type = 'upload' 一并持久化。
+      // 否则图片虽然已存进 KV，但设置里的类型仍是旧值，刷新页面后不会使用这张图。
+      const saved = await api(API.settings, {
+        method: 'POST',
+        body: { settings: { background: currentBgModel() } }
+      });
+      S.data.settings = saved.settings;
       refreshPreview();
       syncFront();
       $('#bgUploadHint').innerHTML = '✅ 已保存到服务器（' + fmtBytes(S.uploadDataUrl.length) + '）。';
-      toast('背景图已上传', 'ok');
+      toast('背景图已上传并启用', 'ok');
     }));
 
     $('#bgUploadDel').addEventListener('click', withBusy($('#bgUploadDel'), async () => {
@@ -1861,9 +1421,19 @@
       S.uploadDataUrl = null;
       $('#bgUploadHint').textContent = '';
       $('#bgUploadActions').style.display = 'none';
+      // 删除后若仍停留在「上传图片」类型，自动切回渐变并保存，避免刷新后配置悬空
+      if ($('#bgType').value === 'upload') {
+        $('#bgType').value = 'gradient';
+        syncBgBoxes();
+        const saved = await api(API.settings, {
+          method: 'POST',
+          body: { settings: { background: currentBgModel() } }
+        });
+        S.data.settings = saved.settings;
+      }
       refreshPreview();
       syncFront();
-      toast('已删除上传的背景图', 'ok');
+      toast('已删除上传的背景图并切回渐变背景', 'ok');
     }));
 
     if (d.background && d.background.dataUrl) {
@@ -1895,23 +1465,55 @@
 
     function refreshPreview() {
       const m = currentBgModel();
+      const sz = sizeValues();
       const el = $('#bgPreview');
       $('.overlay', el).style.setProperty('--ov', (m.overlay / 100));
       if (m.type === 'url' && m.url) {
+        // 先清空简写再设置图片，顺序反过来会把 background-image 一起清掉
+        el.style.background = '';
         el.style.backgroundImage = 'url("' + m.url.replace(/"/g, '%22') + '")';
-        el.style.background = '';
         el.style.backgroundSize = 'cover';
         el.style.backgroundPosition = 'center';
+        el.style.backgroundRepeat = 'no-repeat';
       } else if (m.type === 'upload' && (S.uploadDataUrl || (d.background && d.background.dataUrl))) {
-        el.style.backgroundImage = 'url("' + (S.uploadDataUrl || d.background.dataUrl) + '")';
         el.style.background = '';
+        el.style.backgroundImage = 'url("' + (S.uploadDataUrl || d.background.dataUrl) + '")';
         el.style.backgroundSize = 'cover';
         el.style.backgroundPosition = 'center';
+        el.style.backgroundRepeat = 'no-repeat';
       } else {
         el.style.backgroundImage = '';
         el.style.background = m.gradient;
       }
       el.style.filter = 'blur(' + Math.min(m.blur, 6) + 'px) brightness(' + m.brightness + '%)';
+
+      // 书签尺寸：数值回显 + 卡片预览 + 预设高亮
+      if ($('#sizePrev')) {
+        $('#vSzMinW').textContent = sz.minCardWidth + 'px';
+        $('#vSzGap').textContent = sz.gridGap + 'px';
+        $('#vSzIcon').textContent = sz.iconSize + 'px';
+        $('#vSzPad').textContent = sz.cardPadding + 'px';
+        $('#vSzTitle').textContent = sz.titleSize + 'px';
+        $('#vSzDesc').textContent = sz.descSize + 'px';
+        $('#sizePrev').innerHTML =
+          '<div class="sp-card" style="display:flex;align-items:center;gap:' + (sz.cardPadding * 0.9) + 'px;' +
+            'padding:' + sz.cardPadding + 'px ' + (sz.cardPadding + 1) + 'px;border-radius:12px;background:#fff;' +
+            'border:1px solid #e3e7f0;max-width:340px;min-height:' + (sz.iconSize + sz.cardPadding * 2) + 'px;' +
+            'box-shadow:0 3px 12px rgba(30,50,100,.08)">' +
+            '<div style="flex:0 0 ' + sz.iconSize + 'px;width:' + sz.iconSize + 'px;height:' + sz.iconSize + 'px;' +
+              'border-radius:9px;background:linear-gradient(135deg,#5b8cff,#7c5bff);display:grid;place-items:center;' +
+              'color:#fff;font-weight:700;font-size:' + (sz.iconSize * 0.42).toFixed(1) + 'px">N</div>' +
+            '<div style="min-width:0"><div style="font-size:' + sz.titleSize + 'px;font-weight:650;' +
+              'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">示例书签</div>' +
+              '<div style="font-size:' + sz.descSize + 'px;color:#8a92a6;white-space:nowrap;overflow:hidden;' +
+              'text-overflow:ellipsis">这是书签描述文字预览</div></div>' +
+          '</div>';
+        $$('#sizePresets [data-size-preset]').forEach(b => {
+          const p = SIZE_PRESETS[b.dataset.sizePreset];
+          const same = p && Object.keys(p).every(k => Math.abs(Number(p[k]) - sz[k]) < 0.001);
+          b.classList.toggle('active', !!same);
+        });
+      }
 
       // 实时更新前台
       if (window.NavBox) {
@@ -1927,7 +1529,7 @@
         };
         live.layout = {
           ...((S.data.settings && S.data.settings.layout) || {}),
-          minCardWidth: Number($('#lMinW').value),
+          ...sz,
           showDesc: $('#lDesc').checked,
           showGroupIcon: true,
           denseMobile: $('#lDense').checked
@@ -1958,7 +1560,33 @@
     bindRange('#cOpacity', '#valOpacity', '%');
     bindRange('#cBlur', '#valCBlur', 'px');
     bindRange('#cRadius', '#valRadius', 'px');
-    bindRange('#lMinW', '#valMinW', 'px');
+    ['#szMinW', '#szGap', '#szIcon', '#szPad', '#szTitle', '#szDesc'].forEach(sel => {
+      $(sel).addEventListener('input', refreshPreview);
+    });
+    $$('#sizePresets [data-size-preset]').forEach(b => {
+      b.addEventListener('click', () => {
+        const p = SIZE_PRESETS[b.dataset.sizePreset];
+        if (!p) return;
+        $('#szMinW').value = p.minCardWidth;
+        $('#szGap').value = p.gridGap;
+        $('#szIcon').value = p.iconSize;
+        $('#szPad').value = p.cardPadding;
+        $('#szTitle').value = p.titleSize;
+        $('#szDesc').value = p.descSize;
+        refreshPreview();
+      });
+    });
+    $('#szReset').addEventListener('click', () => {
+      const p = SIZE_PRESETS.standard;
+      $('#szMinW').value = p.minCardWidth;
+      $('#szGap').value = p.gridGap;
+      $('#szIcon').value = p.iconSize;
+      $('#szPad').value = p.cardPadding;
+      $('#szTitle').value = p.titleSize;
+      $('#szDesc').value = p.descSize;
+      refreshPreview();
+      toast('已填入标准尺寸，点「保存全部设置」生效', 'ok', 2400);
+    });
     ['#bgUrl', '#bgGradient', '#cColor', '#cText'].forEach(sel => {
       const el = $(sel);
       el.addEventListener('input', debounce(refreshPreview, 220));
@@ -1985,7 +1613,7 @@
             hoverScale: $('#cHover').checked
           },
           layout: {
-            minCardWidth: Number($('#lMinW').value),
+            ...sizeValues(),
             showDesc: $('#lDesc').checked,
             showGroupIcon: true,
             denseMobile: $('#lDense').checked

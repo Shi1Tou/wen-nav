@@ -389,15 +389,22 @@
       return;
     }
     if (bg.type === 'upload' && state.background && state.background.dataUrl) {
+      // 必须先清空 background 简写再设置 backgroundImage：
+      // style.background = '' 会一并清除 background-image，
+      // 如果反过来写（先设图片再清空简写），图片背景会被自己清掉，表现为背景不生效。
+      layer.style.background = '';
       layer.style.backgroundImage = 'url("' + state.background.dataUrl + '")';
     } else if (bg.type === 'url' && bg.url) {
+      layer.style.background = '';
       layer.style.backgroundImage = 'url("' + bg.url.replace(/"/g, '%22') + '")';
     } else {
       layer.style.backgroundImage = '';
       layer.style.background = bg.gradient || 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)';
       return;
     }
-    layer.style.background = '';
+    layer.style.backgroundSize = 'cover';
+    layer.style.backgroundPosition = 'center center';
+    layer.style.backgroundRepeat = 'no-repeat';
     // 图片加载失败时回退到渐变，避免露出白底
     const probe = new Image();
     probe.onerror = () => {

@@ -558,12 +558,12 @@ console.log('\n[15] 登录态稳定回归（修复“登录后数秒被踢回登
     fnSrc.indexOf('kv.get(K.secret)') > -1);
 }
 
-/* ---------- 16. 设置页新功能（批量可见性 / 书签大小 / 死链检测 / 分组排序） ---------- */
-console.log('\n[16] 设置页：批量可见性 / 书签大小 / 死链检测 / 分组排序');
+/* ---------- 16. 私密设置 / 书签大小 / 背景图片回归 ---------- */
+console.log('\n[16] 私密设置：批量可见性 / 书签大小 / 背景图片');
 {
   // 本段需要管理员会话（第 13 段已登出）
   const lg = await call('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'admin123' } });
-  ok('为设置页功能重新登录成功', lg.status === 200 && lg.data.ok === true, JSON.stringify(lg.data));
+  ok('为新增功能重新登录成功', lg.status === 200 && lg.data.ok === true, JSON.stringify(lg.data));
 
   // ---- 准备：分组与书签 ----
   const g = await call('/api/admin/group', { method: 'POST', body: { action: 'create', group: { name: '设置测试组', icon: '🧪' } } });
@@ -636,49 +636,43 @@ console.log('\n[16] 设置页：批量可见性 / 书签大小 / 死链检测 / 
     body: { settings: { layout: { minCardWidth: 168, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 } } }
   });
 
-  // ---- 死链检测（不依赖外网：只验证校验与安全边界） ----
-  const lcEmpty = await call('/api/admin/linkcheck', { method: 'POST', body: { action: 'check', links: [] } });
-  ok('死链检测空列表返回 400', lcEmpty.status === 400, 'status=' + lcEmpty.status);
-  const lcLocal = await call('/api/admin/linkcheck', {
+  // ---- 背景：外链图片 ----
+  const bgUrl = 'https://i.example.com/bg-regression.jpg';
+  const bgSave = await call('/api/admin/settings', {
     method: 'POST',
-    body: { action: 'check', links: [{ id: 'ssrf', url: 'http://127.0.0.1:8787/api/health' }] }
+    body: { settings: { background: { type: 'url', url: bgUrl, blur: 0, brightness: 100, overlay: 30, gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' } } }
   });
-  const lr = (lcLocal.data.results || [])[0] || {};
-  ok('内网地址被安全拦截（不发起请求）', lr.state === 'blocked' && lr.status === 0, JSON.stringify(lr));
-  const lcFile = await call('/api/admin/linkcheck', {
+  ok('外链图片背景设置已保存',
+    bgSave.status === 200 && bgSave.data.settings.background.type === 'url' && bgSave.data.settings.background.url === bgUrl,
+    JSON.stringify(bgSave.data.settings.background));
+  const bgPublic = await (await fetch(BASE + '/api/bootstrap')).json();
+  ok('前台 bootstrap 返回外链图片背景配置',
+    bgPublic.settings.background.type === 'url' && bgPublic.settings.background.url === bgUrl);
+
+  // ---- 背景：上传图片（base64 存 KV） ----
+  const tiny = 'data:image/png;base64,' + 'A'.repeat(4000);
+  const up = await call('/api/admin/background', { method: 'POST', body: { dataUrl: tiny } });
+  ok('上传背景图到 KV 成功', up.status === 200 && up.data.ok === true, JSON.stringify(up.data));
+  const upSettings = await call('/api/admin/settings', {
     method: 'POST',
-    body: { action: 'check', links: [{ id: 'file', url: 'file:///etc/passwd' }] }
+    body: { settings: { background: { type: 'upload', url: '', blur: 0, brightness: 100, overlay: 30, gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' } } }
   });
-  ok('非 http/https 协议被判为无效', ((lcFile.data.results || [])[0] || {}).state === 'invalid');
-  const lcSave = await call('/api/admin/linkcheck', { method: 'POST', body: { action: 'save', items: [] } });
-  ok('保存检测结果成功', lcSave.status === 200 && lcSave.data.linkCheck.total === 0);
-  const lcGet = await call('/api/admin/linkcheck');
-  ok('可读取上次检测结果', lcGet.status === 200 && lcGet.data.linkCheck !== null);
-  const lcInData = await call('/api/admin/data');
-  ok('管理数据包含 linkCheck 字段', 'linkCheck' in lcInData.data);
+  ok('上传类型背景设置已持久化', upSettings.data.settings.background.type === 'upload',
+    JSON.stringify(upSettings.data.settings.background));
+  const upData = await call('/api/admin/data');
+  ok('管理数据可读回 KV 中的背景图', !!(upData.data.background && upData.data.background.dataUrl));
+  const upPublic = await (await fetch(BASE + '/api/bootstrap')).json();
+  ok('前台 bootstrap 同时返回上传的背景图与类型',
+    upPublic.settings.background.type === 'upload' && !!(upPublic.background && upPublic.background.dataUrl));
 
-  cookie = '';
-  const lcNoAuth = await call('/api/admin/linkcheck', {
-    method: 'POST', body: { action: 'check', links: [{ url: 'https://example.com' }] }
+  // 清理背景并恢复渐变
+  await call('/api/admin/background', { method: 'POST', body: { action: 'delete' } });
+  await call('/api/admin/settings', {
+    method: 'POST',
+    body: { settings: { background: { type: 'gradient', url: '', blur: 0, brightness: 100, overlay: 30, gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' } } }
   });
-  ok('未登录调用死链检测返回 401', lcNoAuth.status === 401, 'status=' + lcNoAuth.status);
-  const lg2 = await call('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'admin123' } });
-  ok('重新登录以继续后续清理', lg2.status === 200 && lg2.data.ok === true);
-
-  // ---- 分组排序调整 ----
-  const all = await call('/api/admin/data');
-  const others = (all.data.groups || []).filter(x => x.id !== gid);
-  const move = [{ id: gid, order: 1 }].concat(others.map((x, i) => ({ id: x.id, order: i + 2 })));
-  const gr = await call('/api/admin/group', { method: 'POST', body: { action: 'reorder', orders: move } });
-  ok('分组重排到第一位成功', gr.status === 200 && gr.data.ok === true);
-  const top = (gr.data.groups || [])[0];
-  ok('重排后设置测试组位于首位', top && top.id === gid, JSON.stringify(top));
-
-  // 恢复原顺序
-  const origin = (all.data.groups || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
-  await call('/api/admin/group', {
-    method: 'POST', body: { action: 'reorder', orders: origin.map((x, i) => ({ id: x.id, order: i + 1 })) }
-  });
+  const bgClean = await call('/api/admin/data');
+  ok('背景图与设置已恢复默认', bgClean.data.background === null && bgClean.data.settings.background.type === 'gradient');
 
   // ---- 清理 ----
   const del = await call('/api/admin/group', { method: 'POST', body: { action: 'delete', id: gid, force: true } });
