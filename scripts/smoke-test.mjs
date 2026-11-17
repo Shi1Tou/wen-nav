@@ -642,10 +642,55 @@ console.log('\n[16] 私密设置：批量可见性 / 书签大小 / 背景图片
   const bs3 = await (await fetch(BASE + '/api/bootstrap')).json();
   ok('前台 bootstrap 返回书签排列方式', bs3.settings.layout.cardStyle === 'tile');
 
-  // 恢复标准布局
+  // ---- 自定义布局：图标位置 / 名称描述顺序 / 对齐 / 文字颜色 ----
+  const custom = await call('/api/admin/settings', {
+    method: 'POST',
+    body: {
+      settings: {
+        card: { titleColor: '#CC0000', descColor: '#005500' },
+        layout: { iconPosition: 'right', textOrder: 'desc-first', textAlign: 'center' }
+      }
+    }
+  });
+  const CUS = custom.data.settings;
+  ok('名称 / 描述自定义颜色已保存',
+    CUS.card.titleColor === '#cc0000' && CUS.card.descColor === '#005500',
+    JSON.stringify(CUS.card));
+  ok('图标位置 / 文字顺序 / 对齐已保存',
+    CUS.layout.iconPosition === 'right' && CUS.layout.textOrder === 'desc-first' && CUS.layout.textAlign === 'center',
+    JSON.stringify(CUS.layout));
+
+  const badCustom = await call('/api/admin/settings', {
+    method: 'POST',
+    body: {
+      settings: {
+        card: { titleColor: 'red', descColor: '#12' },
+        layout: { iconPosition: 'neon', textOrder: 'x', textAlign: 'x' }
+      }
+    }
+  });
+  ok('非法颜色回退为空（跟随主题）',
+    badCustom.data.settings.card.titleColor === '' && badCustom.data.settings.card.descColor === '');
+  ok('非法布局枚举保留原值',
+    badCustom.data.settings.layout.iconPosition === 'right' &&
+    badCustom.data.settings.layout.textOrder === 'desc-first' &&
+    badCustom.data.settings.layout.textAlign === 'center');
+
+  const bs4 = await (await fetch(BASE + '/api/bootstrap')).json();
+  ok('前台 bootstrap 返回自定义布局字段',
+    bs4.settings.layout.iconPosition === 'right' &&
+    bs4.settings.layout.textOrder === 'desc-first' &&
+    bs4.settings.layout.textAlign === 'center');
+
+  // 恢复标准布局与默认文字颜色
   await call('/api/admin/settings', {
     method: 'POST',
-    body: { settings: { layout: { cardStyle: 'row', minCardWidth: 168, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 } } }
+    body: {
+      settings: {
+        card: { titleColor: '', descColor: '' },
+        layout: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', showDesc: true, minCardWidth: 168, iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 }
+      }
+    }
   });
 
   // ---- 背景：外链图片 ----

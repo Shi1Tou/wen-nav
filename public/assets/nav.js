@@ -366,9 +366,19 @@
     root.style.setProperty('--card-desc-size', num(l.descSize, 11.5) + 'px');
     root.style.setProperty('--card-pad', num(l.cardPadding, 11) + 'px');
     root.style.setProperty('--grid-gap', num(l.gridGap, 14) + 'px');
-    // 书签排列方式：横向 / 图标墙 / 列表
-    document.body.classList.toggle('card-tile', l.cardStyle === 'tile');
+    // 列表模式：每行一个书签
     document.body.classList.toggle('card-list', l.cardStyle === 'list');
+    // 自定义布局：图标位置（旧数据的 tile 预设回退为图标在上）
+    const iconPos = ['left', 'right', 'top', 'bottom', 'hidden'].indexOf(l.iconPosition) > -1
+      ? l.iconPosition
+      : (l.cardStyle === 'tile' ? 'top' : 'left');
+    ['left', 'right', 'top', 'bottom', 'hidden'].forEach(p => {
+      document.body.classList.toggle('icon-' + p, p === iconPos);
+    });
+    // 名称 / 描述顺序与文字对齐
+    document.body.classList.toggle('text-desc-first', l.textOrder === 'desc-first');
+    document.body.classList.toggle('text-center', l.textAlign === 'center');
+    document.body.classList.toggle('text-right', l.textAlign === 'right');
   }
 
   function applySettings() {
@@ -389,7 +399,7 @@
     root.style.setProperty('--bg-brightness', num(bg.brightness, 100) + '%');
     root.style.setProperty('--bg-overlay', num(bg.overlay, 30) / 100);
 
-    // 书签尺寸（图标 / 字号 / 内边距 / 间距），由后台「设置 → 书签大小」控制
+    // 书签尺寸（图标 / 字号 / 内边距 / 间距），由后台「外观 → 书签卡片样式」控制
     applySizeVars(layout);
     // 透明度、背景色与文字色（文字色最终由 applyCardColors 按可读性决定）
     state.cardAlpha = Math.max(0, Math.min(1, num(card.opacity, 82) / 100));
@@ -465,6 +475,15 @@
     root.style.setProperty('--card-bg-item', itemCss);
     root.style.setProperty('--card-bg-item-hover', itemHoverCss);
     root.style.setProperty('--card-text', text);
+
+    // 自定义名称 / 描述颜色：空值表示跟随主题；设置后仍做可读性兜底
+    const cardCfg = (state.settings && state.settings.card) || {};
+    const customTitle = normalizeHex(cardCfg.titleColor);
+    if (customTitle) root.style.setProperty('--card-title-color', ensureReadableText(customTitle, effBg));
+    else root.style.removeProperty('--card-title-color');
+    const customDesc = normalizeHex(cardCfg.descColor);
+    if (customDesc) root.style.setProperty('--card-desc-color', ensureReadableText(customDesc, effBg));
+    else root.style.removeProperty('--card-desc-color');
 
     // 边框与次要文字按实际等效底色的明暗自适应
     const onDark = !isDarkText(effBg);
@@ -788,8 +807,8 @@
       state.settings = {
         siteTitle: 'NavBox 导航', siteSubtitle: '尚未连接到后端数据',
         background: { type: 'gradient', gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)', overlay: 30 },
-        card: { opacity: 82, blur: 12, radius: 14, textColor: '#1f2430', bgColor: '#ffffff', hoverScale: true },
-        layout: { minCardWidth: 168, showDesc: true, showGroupIcon: true, cardStyle: 'row', iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 },
+        card: { opacity: 82, blur: 12, radius: 14, textColor: '#1f2430', bgColor: '#ffffff', titleColor: '', descColor: '', hoverScale: true },
+        layout: { minCardWidth: 168, showDesc: true, showGroupIcon: true, cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', iconSize: 38, titleSize: 14, descSize: 11.5, cardPadding: 11, gridGap: 14 },
         favicon: { provider: 'favicon.im' },
         search: { enabled: true, placeholder: '搜索书签…', openInNewTab: true },
         footer: ''

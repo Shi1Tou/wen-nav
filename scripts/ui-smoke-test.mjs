@@ -135,6 +135,11 @@ try {
   // ---------------- 外观：书签大小 + 背景 ----------------
   doc.querySelector('#adminTabs [data-tab="style"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   ok('外观标签页已渲染', await waitFor(() => doc.querySelector('#sizePrev') && doc.querySelector('#bgType'), 6000));
+  ok('主页书签描述已渲染',
+    doc.querySelectorAll('#content .c-desc').length > 0 && !doc.body.classList.contains('no-desc'),
+    'desc=' + doc.querySelectorAll('#content .c-desc').length + ' class=' + doc.body.className);
+  ok('自定义布局控件齐全',
+    ['#lIconPos', '#lTextOrder', '#lTextAlign', '#cTitleColor', '#cDescColor'].every(s => doc.querySelector(s)));
 
   // 书签大小：预设 + 实时 CSS 变量
   doc.querySelector('[data-size-preset="compact"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
@@ -152,11 +157,59 @@ try {
   doc.querySelector('[data-size-preset="tile"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(150);
   ok('图标墙预设切换排列方式',
-    doc.querySelector('#lCardStyle').value === 'tile' && doc.body.classList.contains('card-tile'),
-    doc.querySelector('#lCardStyle').value + ' / ' + doc.body.className);
+    doc.querySelector('#lCardStyle').value === 'tile' && doc.querySelector('#lIconPos').value === 'top' &&
+    doc.body.classList.contains('icon-top'),
+    doc.querySelector('#lCardStyle').value + ' / ' + doc.querySelector('#lIconPos').value + ' / ' + doc.body.className);
   ok('图标墙预设注入对应图标尺寸',
     doc.documentElement.style.getPropertyValue('--card-icon').trim() === '44px',
     doc.documentElement.style.getPropertyValue('--card-icon'));
+
+  // 自定义布局：图标位置 / 名称描述顺序 / 对齐 / 文字颜色
+  doc.querySelector('#lIconPos').value = 'top';
+  doc.querySelector('#lIconPos').dispatchEvent(new window.Event('change', { bubbles: true }));
+  doc.querySelector('#lTextOrder').value = 'desc-first';
+  doc.querySelector('#lTextOrder').dispatchEvent(new window.Event('change', { bubbles: true }));
+  doc.querySelector('#lTextAlign').value = 'center';
+  doc.querySelector('#lTextAlign').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await sleep(150);
+  ok('图标位置 / 文字顺序 / 对齐实时生效',
+    doc.body.classList.contains('icon-top') && doc.body.classList.contains('text-desc-first') &&
+    doc.body.classList.contains('text-center'),
+    doc.body.className);
+
+  const titleOn = doc.querySelector('#cTitleColorOn');
+  titleOn.checked = true;
+  titleOn.dispatchEvent(new window.Event('change', { bubbles: true }));
+  const descOn = doc.querySelector('#cDescColorOn');
+  descOn.checked = true;
+  descOn.dispatchEvent(new window.Event('change', { bubbles: true }));
+  doc.querySelector('#cTitleColor').value = '#cc0000';
+  doc.querySelector('#cTitleColor').dispatchEvent(new window.Event('input', { bubbles: true }));
+  doc.querySelector('#cDescColor').value = '#005500';
+  doc.querySelector('#cDescColor').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await sleep(500);
+  ok('名称 / 描述自定义颜色实时生效',
+    doc.documentElement.style.getPropertyValue('--card-title-color').trim() === '#cc0000' &&
+    doc.documentElement.style.getPropertyValue('--card-desc-color').trim() === '#005500',
+    doc.documentElement.style.getPropertyValue('--card-title-color') + ' / ' +
+    doc.documentElement.style.getPropertyValue('--card-desc-color'));
+
+  const descToggle = doc.querySelector('#lDesc');
+  descToggle.checked = false;
+  descToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await sleep(120);
+  ok('关闭描述后应用 no-desc', doc.body.classList.contains('no-desc'));
+  descToggle.checked = true;
+  descToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await sleep(120);
+  ok('重新开启描述后恢复显示', !doc.body.classList.contains('no-desc'));
+
+  doc.querySelector('[data-size-preset="minimal"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(150);
+  ok('极简预设不再误关描述',
+    doc.querySelector('#lDesc').checked && !doc.body.classList.contains('no-desc') &&
+    doc.querySelector('#szIcon').value === '26',
+    'desc=' + doc.querySelector('#lDesc').checked + ' icon=' + doc.querySelector('#szIcon').value);
 
   // 背景：外链图片
   doc.querySelector('#bgType').value = 'url';
@@ -262,7 +315,8 @@ try {
       body: JSON.stringify({
         settings: {
           background: { type: 'gradient', url: '', blur: 0, brightness: 100, overlay: 30, gradient: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' },
-          layout: { cardStyle: 'row', minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 }
+          card: { titleColor: '', descColor: '' },
+          layout: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', showDesc: true, minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5 }
         }
       })
     });

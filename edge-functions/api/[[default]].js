@@ -311,6 +311,8 @@ function defaultSettings() {
       blur: 12,              // 毛玻璃强度 px
       radius: 14,            // 圆角 px
       textColor: '#1f2430',
+      titleColor: '',        // 书签名称颜色，空 = 跟随 textColor
+      descColor: '',         // 书签描述颜色，空 = 使用次要文字色
       hoverScale: true
     },
     layout: {
@@ -319,6 +321,9 @@ function defaultSettings() {
       showGroupIcon: true,
       denseMobile: false,
       cardStyle: 'row',      // row | tile | list
+      iconPosition: 'left',  // left | right | top | bottom | hidden
+      textOrder: 'title-first', // title-first | desc-first
+      textAlign: 'left',     // left | center | right
       iconSize: 38,          // 书签图标尺寸 px
       titleSize: 14,         // 书签标题字号 px
       descSize: 11.5,        // 书签描述字号 px
@@ -349,12 +354,19 @@ function defaultSettings() {
 function mergeSettings(stored) {
   const base = defaultSettings();
   const s = (stored && typeof stored === 'object') ? stored : {};
+  const layout = { ...base.layout, ...(s.layout || {}) };
+  // 兼容修复：旧版布局预设（极简 / 图标墙）曾把 showDesc 设为 false，
+  // 而这些旧数据没有 iconPosition 字段。这里自动恢复描述显示，避免主页描述消失；
+  // 新版本保存过一次后 iconPosition 存在，用户的显式「不显示描述」会被尊重。
+  if (s.layout && s.layout.iconPosition === undefined && s.layout.showDesc === false) {
+    layout.showDesc = true;
+  }
   return {
     ...base,
     ...s,
     background: { ...base.background, ...(s.background || {}) },
     card: { ...base.card, ...(s.card || {}) },
-    layout: { ...base.layout, ...(s.layout || {}) },
+    layout,
     favicon: { ...base.favicon, ...(s.favicon || {}) },
     search: { ...base.search, ...(s.search || {}) }
   };
@@ -1332,6 +1344,7 @@ async function handle(path, method, request, context) {
           };
         }
         if (s.card) {
+          const hexColor = v => /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v).toLowerCase() : '';
           merged.card = {
             ...merged.card,
             opacity: num(s.card.opacity, 0, 100, merged.card.opacity),
@@ -1339,6 +1352,9 @@ async function handle(path, method, request, context) {
             blur: num(s.card.blur, 0, 40, merged.card.blur),
             radius: num(s.card.radius, 0, 40, merged.card.radius),
             textColor: String(s.card.textColor || merged.card.textColor).slice(0, 32),
+            // 空字符串 = 跟随主题自动配色；仅接受 #rrggbb
+            titleColor: s.card.titleColor !== undefined ? hexColor(s.card.titleColor) : merged.card.titleColor,
+            descColor: s.card.descColor !== undefined ? hexColor(s.card.descColor) : merged.card.descColor,
             hoverScale: s.card.hoverScale !== undefined ? !!s.card.hoverScale : merged.card.hoverScale
           };
         }
@@ -1352,6 +1368,13 @@ async function handle(path, method, request, context) {
             // 书签排列方式：row=横向，tile=图标墙，list=列表
             cardStyle: ['row', 'tile', 'list'].includes(s.layout.cardStyle)
               ? s.layout.cardStyle : merged.layout.cardStyle,
+            // 自定义布局：图标位置 / 名称与描述顺序 / 文字对齐
+            iconPosition: ['left', 'right', 'top', 'bottom', 'hidden'].includes(s.layout.iconPosition)
+              ? s.layout.iconPosition : merged.layout.iconPosition,
+            textOrder: ['title-first', 'desc-first'].includes(s.layout.textOrder)
+              ? s.layout.textOrder : merged.layout.textOrder,
+            textAlign: ['left', 'center', 'right'].includes(s.layout.textAlign)
+              ? s.layout.textAlign : merged.layout.textAlign,
             // 书签大小（图标 / 字号 / 内边距 / 间距），用于后台「外观 → 书签卡片样式」
             iconSize: num(s.layout.iconSize, 20, 64, merged.layout.iconSize),
             titleSize: num(s.layout.titleSize, 10, 22, merged.layout.titleSize),

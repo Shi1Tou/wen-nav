@@ -304,10 +304,14 @@ body.hover-scale .card:hover { transform: translateY(-3px) scale(1.015); }
   letter-spacing: 0;
 }
 
-.card .c-body { flex: 1 1 auto; min-width: 0; }
+.card .c-body {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center;
+}
 .card .c-title {
   font-size: calc(var(--card-title-size) * var(--size-scale));
   font-weight: 650;
+  color: var(--card-title-color, var(--card-text));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -315,7 +319,7 @@ body.hover-scale .card:hover { transform: translateY(-3px) scale(1.015); }
 }
 .card .c-desc {
   font-size: calc(var(--card-desc-size) * var(--size-scale));
-  color: var(--muted);
+  color: var(--card-desc-color, var(--muted));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -324,19 +328,31 @@ body.hover-scale .card:hover { transform: translateY(-3px) scale(1.015); }
 }
 body.no-desc .card .c-desc { display: none; }
 
-/* 书签排列方式：图标墙（图标在上）/ 列表（每行一个） */
-body.card-tile .card {
+/* 自定义布局：图标位置 */
+body.icon-right .card { flex-direction: row-reverse; }
+body.icon-top .card {
   flex-direction: column;
   justify-content: center;
-  text-align: center;
   gap: calc(var(--card-pad) * .6 * var(--size-scale));
-  min-height: calc((var(--card-icon) + var(--card-pad) * 2 + 18px) * var(--size-scale));
 }
-body.card-tile .card .c-body { flex: 0 0 auto; width: 100%; }
-body.card-tile .card .c-title,
-body.card-tile .card .c-desc { text-align: center; }
-body.card-tile .card .c-badge { top: 4px; right: 5px; }
+body.icon-bottom .card {
+  flex-direction: column-reverse;
+  justify-content: center;
+  gap: calc(var(--card-pad) * .6 * var(--size-scale));
+}
+body.icon-hidden .card .c-icon { display: none; }
+body.icon-top .card .c-body,
+body.icon-bottom .card .c-body { flex: 0 0 auto; width: 100%; }
+body.icon-top .card .c-badge,
+body.icon-bottom .card .c-badge { top: 4px; right: 5px; }
 
+/* 自定义布局：名称 / 描述顺序与文字对齐 */
+body.text-desc-first .card .c-body { flex-direction: column-reverse; }
+body.text-desc-first .card .c-desc { margin-top: 0; margin-bottom: 2px; }
+body.text-center .card .c-body { text-align: center; align-items: center; }
+body.text-right .card .c-body { text-align: right; align-items: flex-end; }
+
+/* 列表布局：每行一个书签 */
 body.card-list .grid { grid-template-columns: 1fr; }
 body.card-list .card { min-height: calc((var(--card-icon) + var(--card-pad) * 2) * var(--size-scale)); }
 

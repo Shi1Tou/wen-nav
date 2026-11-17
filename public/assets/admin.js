@@ -1159,16 +1159,23 @@
     const bg = s.background || {};
     const card = s.card || {};
     const layout = s.layout || {};
+    const iconPos = ['left', 'right', 'top', 'bottom', 'hidden'].indexOf(layout.iconPosition) > -1
+      ? layout.iconPosition
+      : (layout.cardStyle === 'tile' ? 'top' : 'left');
+    const textOrder = layout.textOrder === 'desc-first' ? 'desc-first' : 'title-first';
+    const textAlign = ['left', 'center', 'right'].indexOf(layout.textAlign) > -1 ? layout.textAlign : 'left';
+    const titleColorVal = card.titleColor || card.textColor || '#1f2430';
+    const descColorVal = card.descColor || '#7a8296';
 
-    const SIZE_DEFAULTS = { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5, cardStyle: 'row' };
+    const SIZE_DEFAULTS = { minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5, cardStyle: 'row', iconPosition: 'left' };
     const SIZE_PRESETS = {
-      standard: { cardStyle: 'row', minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5, showDesc: true },
-      compact: { cardStyle: 'row', minCardWidth: 140, gridGap: 10, iconSize: 30, cardPadding: 8, titleSize: 12.5, descSize: 10.5, showDesc: true },
-      minimal: { cardStyle: 'row', minCardWidth: 130, gridGap: 8, iconSize: 26, cardPadding: 6, titleSize: 12, descSize: 10.5, showDesc: false },
-      large: { cardStyle: 'row', minCardWidth: 200, gridGap: 16, iconSize: 46, cardPadding: 14, titleSize: 15.5, descSize: 12.5, showDesc: true },
-      xlarge: { cardStyle: 'row', minCardWidth: 240, gridGap: 18, iconSize: 54, cardPadding: 16, titleSize: 17, descSize: 13.5, showDesc: true },
-      tile: { cardStyle: 'tile', minCardWidth: 110, gridGap: 10, iconSize: 44, cardPadding: 10, titleSize: 12.5, descSize: 10.5, showDesc: false },
-      list: { cardStyle: 'list', minCardWidth: 280, gridGap: 12, iconSize: 34, cardPadding: 10, titleSize: 14, descSize: 12, showDesc: true }
+      standard: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', minCardWidth: 168, gridGap: 14, iconSize: 38, cardPadding: 11, titleSize: 14, descSize: 11.5, showDesc: true },
+      compact: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', minCardWidth: 140, gridGap: 10, iconSize: 30, cardPadding: 8, titleSize: 12.5, descSize: 10.5, showDesc: true },
+      minimal: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', minCardWidth: 130, gridGap: 8, iconSize: 26, cardPadding: 6, titleSize: 12, descSize: 10.5, showDesc: true },
+      large: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', minCardWidth: 200, gridGap: 16, iconSize: 46, cardPadding: 14, titleSize: 15.5, descSize: 12.5, showDesc: true },
+      xlarge: { cardStyle: 'row', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', minCardWidth: 240, gridGap: 18, iconSize: 54, cardPadding: 16, titleSize: 17, descSize: 13.5, showDesc: true },
+      tile: { cardStyle: 'tile', iconPosition: 'top', textOrder: 'title-first', textAlign: 'center', minCardWidth: 110, gridGap: 10, iconSize: 44, cardPadding: 10, titleSize: 12.5, descSize: 10.5, showDesc: true },
+      list: { cardStyle: 'list', iconPosition: 'left', textOrder: 'title-first', textAlign: 'left', minCardWidth: 280, gridGap: 12, iconSize: 34, cardPadding: 10, titleSize: 14, descSize: 12, showDesc: true }
     };
     function sizeNum(k) {
       const v = Number(layout[k]);
@@ -1177,6 +1184,9 @@
     function sizeValues() {
       return {
         cardStyle: $('#lCardStyle') ? $('#lCardStyle').value : 'row',
+        iconPosition: $('#lIconPos') ? $('#lIconPos').value : 'left',
+        textOrder: $('#lTextOrder') ? $('#lTextOrder').value : 'title-first',
+        textAlign: $('#lTextAlign') ? $('#lTextAlign').value : 'left',
         minCardWidth: Number($('#szMinW').value),
         gridGap: Number($('#szGap').value),
         iconSize: Number($('#szIcon').value),
@@ -1311,11 +1321,52 @@
         '</div>' +
         '<div class="field"><label>卡片排列方式</label>' +
           '<select class="select" id="lCardStyle">' +
-            '<option value="row"' + ((layout.cardStyle || 'row') === 'row' ? ' selected' : '') + '>横向：图标在左，文字在右</option>' +
-            '<option value="tile"' + (layout.cardStyle === 'tile' ? ' selected' : '') + '>图标墙：图标在上，名称在下</option>' +
+            '<option value="row"' + ((layout.cardStyle || 'row') === 'row' ? ' selected' : '') + '>网格：多列卡片</option>' +
+            '<option value="tile"' + (layout.cardStyle === 'tile' ? ' selected' : '') + '>网格：图标在上</option>' +
             '<option value="list"' + (layout.cardStyle === 'list' ? ' selected' : '') + '>列表：每行一个书签</option>' +
           '</select>' +
-          '<div class="field-hint">图标墙适合图标多、文字少的站点；列表适合描述较长的书签。</div>' +
+          '<div class="field-hint">决定整体是网格还是单列列表；图标位置可在下方单独调整。</div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div class="field"><label>网站图标位置</label>' +
+            '<select class="select" id="lIconPos">' +
+              '<option value="left"' + (iconPos === 'left' ? ' selected' : '') + '>左侧</option>' +
+              '<option value="right"' + (iconPos === 'right' ? ' selected' : '') + '>右侧</option>' +
+              '<option value="top"' + (iconPos === 'top' ? ' selected' : '') + '>上方</option>' +
+              '<option value="bottom"' + (iconPos === 'bottom' ? ' selected' : '') + '>下方</option>' +
+              '<option value="hidden"' + (iconPos === 'hidden' ? ' selected' : '') + '>不显示图标</option>' +
+            '</select></div>' +
+          '<div class="field"><label>名称 / 描述顺序</label>' +
+            '<select class="select" id="lTextOrder">' +
+              '<option value="title-first"' + (textOrder === 'title-first' ? ' selected' : '') + '>名称在上，描述在下</option>' +
+              '<option value="desc-first"' + (textOrder === 'desc-first' ? ' selected' : '') + '>描述在上，名称在下</option>' +
+            '</select></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div class="field"><label>文字对齐</label>' +
+            '<select class="select" id="lTextAlign">' +
+              '<option value="left"' + (textAlign === 'left' ? ' selected' : '') + '>左对齐</option>' +
+              '<option value="center"' + (textAlign === 'center' ? ' selected' : '') + '>居中</option>' +
+              '<option value="right"' + (textAlign === 'right' ? ' selected' : '') + '>右对齐</option>' +
+            '</select></div>' +
+          '<div class="field"><label>描述文字</label>' +
+            '<label class="switch" style="margin-top:8px"><input type="checkbox" id="lDesc"' + (layout.showDesc !== false ? ' checked' : '') + '>' +
+              '<span class="track"></span><span class="lbl">显示书签描述</span></label>' +
+            '<div class="field-hint">关闭后主页卡片只显示名称。</div></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div class="field"><label>书签名称颜色</label>' +
+            '<div class="color-with-check">' +
+              '<input type="color" id="cTitleColor" value="' + esc(normalizeColor(titleColorVal)) + '">' +
+              '<label class="chk-inline"><input type="checkbox" id="cTitleColorOn"' + (card.titleColor ? ' checked' : '') + '> 自定义</label>' +
+            '</div>' +
+            '<div class="field-hint">不勾选时跟随上方「文字颜色」，并自动适配明暗主题。</div></div>' +
+          '<div class="field"><label>书签描述颜色</label>' +
+            '<div class="color-with-check">' +
+              '<input type="color" id="cDescColor" value="' + esc(normalizeColor(descColorVal)) + '">' +
+              '<label class="chk-inline"><input type="checkbox" id="cDescColorOn"' + (card.descColor ? ' checked' : '') + '> 自定义</label>' +
+            '</div>' +
+            '<div class="field-hint">不勾选时使用主题的次要文字色。</div></div>' +
         '</div>' +
         '<div class="size-preview" id="sizePrev"></div>' +
         '<div class="row2">' +
@@ -1344,8 +1395,6 @@
       '<div class="section-card"><h3><span class="h-ico">📐</span>布局与搜索</h3>' +
         '<div class="field"><label>搜索框占位提示</label>' +
           '<input class="input" id="sSearchPh" maxlength="60" value="' + esc((s.search && s.search.placeholder) || '') + '"></div>' +
-        '<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="lDesc"' + (layout.showDesc !== false ? ' checked' : '') + '>' +
-          '<span class="track"></span><span class="lbl">显示书签描述文字</span></label><br>' +
         '<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="lDense"' + (layout.denseMobile ? ' checked' : '') + '>' +
           '<span class="track"></span><span class="lbl">手机端使用密集布局（每行更多卡片）</span></label><br>' +
         '<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="sSearchOn"' + ((s.search && s.search.enabled) !== false ? ' checked' : '') + '>' +
@@ -1515,37 +1564,52 @@
 
       // 书签布局：数值回显 + 卡片预览 + 预设高亮
       if ($('#sizePrev')) {
-        const isTile = sz.cardStyle === 'tile';
         const isList = sz.cardStyle === 'list';
+        const iconPos = sz.iconPosition || 'left';
+        const isVertical = iconPos === 'top' || iconPos === 'bottom';
+        const hideIcon = iconPos === 'hidden';
+        const align = sz.textAlign || 'left';
+        const descFirst = sz.textOrder === 'desc-first';
         const showDesc = $('#lDesc').checked;
-        const prevGap = isTile ? sz.cardPadding * 0.6 : sz.cardPadding * 0.9;
+        const titleColor = $('#cTitleColorOn').checked ? $('#cTitleColor').value : 'inherit';
+        const descColor = $('#cDescColorOn').checked ? $('#cDescColor').value : '#8a92a6';
+        const prevGap = isVertical ? sz.cardPadding * 0.6 : sz.cardPadding * 0.9;
         $('#vSzMinW').textContent = sz.minCardWidth + 'px';
         $('#vSzGap').textContent = sz.gridGap + 'px';
         $('#vSzIcon').textContent = sz.iconSize + 'px';
         $('#vSzPad').textContent = sz.cardPadding + 'px';
         $('#vSzTitle').textContent = sz.titleSize + 'px';
         $('#vSzDesc').textContent = sz.descSize + 'px';
+
+        const titleHtml = '<div style="font-size:' + sz.titleSize + 'px;font-weight:650;color:' + titleColor +
+          ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:' + align + '">示例书签</div>';
+        const descHtml = showDesc
+          ? '<div style="font-size:' + sz.descSize + 'px;color:' + descColor +
+            ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:' + align + '">这是书签描述文字预览</div>'
+          : '';
+        const bodyHtml = '<div style="min-width:0' + (isVertical ? ';width:100%' : '') +
+          ';display:flex;flex-direction:column;' + (descFirst ? 'flex-direction:column-reverse;' : '') + '">' +
+          (descFirst ? descHtml + titleHtml : titleHtml + descHtml) + '</div>';
+        const iconHtml = hideIcon ? '' :
+          '<div style="flex:0 0 ' + sz.iconSize + 'px;width:' + sz.iconSize + 'px;height:' + sz.iconSize + 'px;' +
+            'border-radius:9px;background:linear-gradient(135deg,#5b8cff,#7c5bff);display:grid;place-items:center;' +
+            'color:#fff;font-weight:700;font-size:' + (sz.iconSize * 0.42).toFixed(1) + 'px">N</div>';
+        const flexDir = isVertical ? (iconPos === 'bottom' ? 'column-reverse' : 'column')
+          : (iconPos === 'right' ? 'row-reverse' : 'row');
         $('#sizePrev').innerHTML =
-          '<div class="sp-card" style="display:flex;' + (isTile ? 'flex-direction:column;text-align:center;' : '') +
-            'align-items:center;justify-content:center;gap:' + prevGap + 'px;' +
-            'padding:' + sz.cardPadding + 'px ' + (sz.cardPadding + 1) + 'px;border-radius:12px;background:#fff;' +
-            'border:1px solid #e3e7f0;max-width:' + (isList ? 420 : 340) + 'px;min-height:' +
-            (sz.iconSize + sz.cardPadding * 2) + 'px;box-shadow:0 3px 12px rgba(30,50,100,.08)">' +
-            '<div style="flex:0 0 ' + sz.iconSize + 'px;width:' + sz.iconSize + 'px;height:' + sz.iconSize + 'px;' +
-              'border-radius:9px;background:linear-gradient(135deg,#5b8cff,#7c5bff);display:grid;place-items:center;' +
-              'color:#fff;font-weight:700;font-size:' + (sz.iconSize * 0.42).toFixed(1) + 'px">N</div>' +
-            '<div style="min-width:0' + (isTile ? ';width:100%' : '') + '"><div style="font-size:' + sz.titleSize +
-              'px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:' +
-              (isTile ? 'center' : 'left') + '">示例书签</div>' +
-              (showDesc ? '<div style="font-size:' + sz.descSize + 'px;color:#8a92a6;white-space:nowrap;overflow:hidden;' +
-              'text-overflow:ellipsis;text-align:' + (isTile ? 'center' : 'left') + '">这是书签描述文字预览</div>' : '') +
-            '</div>' +
+          '<div class="sp-card" style="display:flex;flex-direction:' + flexDir + ';align-items:center;' +
+            'justify-content:center;gap:' + prevGap + 'px;padding:' + sz.cardPadding + 'px ' + (sz.cardPadding + 1) +
+            'px;border-radius:12px;background:#fff;border:1px solid #e3e7f0;max-width:' + (isList ? 420 : 340) +
+            'px;min-height:' + (sz.iconSize + sz.cardPadding * 2) + 'px;box-shadow:0 3px 12px rgba(30,50,100,.08)">' +
+            iconHtml + bodyHtml +
           '</div>';
+
         const keys = ['minCardWidth', 'gridGap', 'iconSize', 'cardPadding', 'titleSize', 'descSize'];
         $$('#sizePresets [data-size-preset]').forEach(b => {
           const p = SIZE_PRESETS[b.dataset.sizePreset];
-          const same = p && p.cardStyle === sz.cardStyle && p.showDesc === showDesc &&
-            keys.every(k => Math.abs(Number(p[k]) - sz[k]) < 0.001);
+          const same = p && keys.every(k => Math.abs(Number(p[k]) - sz[k]) < 0.001) &&
+            p.cardStyle === sz.cardStyle && p.iconPosition === iconPos &&
+            p.textOrder === sz.textOrder && p.textAlign === align && p.showDesc === showDesc;
           b.classList.toggle('active', !!same);
         });
       }
@@ -1555,11 +1619,14 @@
         const live = JSON.parse(JSON.stringify(S.data.settings));
         live.background = m;
         live.card = {
+          ...((S.data.settings && S.data.settings.card) || {}),
           opacity: Number($('#cOpacity').value),
           bgColor: $('#cColor').value,
           blur: Number($('#cBlur').value),
           radius: Number($('#cRadius').value),
           textColor: $('#cText').value,
+          titleColor: $('#cTitleColorOn').checked ? $('#cTitleColor').value : '',
+          descColor: $('#cDescColorOn').checked ? $('#cDescColor').value : '',
           hoverScale: $('#cHover').checked
         };
         live.layout = {
@@ -1598,10 +1665,20 @@
     ['#szMinW', '#szGap', '#szIcon', '#szPad', '#szTitle', '#szDesc'].forEach(sel => {
       $(sel).addEventListener('input', refreshPreview);
     });
-    $('#lCardStyle').addEventListener('change', refreshPreview);
+    ['#lIconPos', '#lTextOrder', '#lTextAlign'].forEach(sel => $(sel).addEventListener('change', refreshPreview));
+    $('#lCardStyle').addEventListener('change', () => {
+      // 选择「图标在上」时同步图标位置；切回普通网格且图标为上下时恢复左侧
+      const st = $('#lCardStyle').value;
+      if (st === 'tile') $('#lIconPos').value = 'top';
+      else if (st === 'row' && ['top', 'bottom'].indexOf($('#lIconPos').value) > -1) $('#lIconPos').value = 'left';
+      refreshPreview();
+    });
     function applySizePreset(p) {
       if (!p) return;
       $('#lCardStyle').value = p.cardStyle;
+      $('#lIconPos').value = p.iconPosition;
+      $('#lTextOrder').value = p.textOrder;
+      $('#lTextAlign').value = p.textAlign;
       $('#lDesc').checked = p.showDesc;
       $('#szMinW').value = p.minCardWidth;
       $('#szGap').value = p.gridGap;
@@ -1618,12 +1695,12 @@
       applySizePreset(SIZE_PRESETS.standard);
       toast('已填入标准布局，点「保存全部设置」生效', 'ok', 2400);
     });
-    ['#bgUrl', '#bgGradient', '#cColor', '#cText'].forEach(sel => {
+    ['#bgUrl', '#bgGradient', '#cColor', '#cText', '#cTitleColor', '#cDescColor'].forEach(sel => {
       const el = $(sel);
       el.addEventListener('input', debounce(refreshPreview, 220));
       el.addEventListener('change', refreshPreview);
     });
-    ['#cHover', '#lDesc', '#lDense'].forEach(sel => $(sel).addEventListener('change', refreshPreview));
+    ['#cHover', '#lDesc', '#lDense', '#cTitleColorOn', '#cDescColorOn'].forEach(sel => $(sel).addEventListener('change', refreshPreview));
 
     /* --- 保存 --- */
     $('#saveStyle').addEventListener('click', withBusy($('#saveStyle'), async () => {
@@ -1641,6 +1718,8 @@
             blur: Number($('#cBlur').value),
             radius: Number($('#cRadius').value),
             textColor: $('#cText').value,
+            titleColor: $('#cTitleColorOn').checked ? $('#cTitleColor').value : '',
+            descColor: $('#cDescColorOn').checked ? $('#cDescColor').value : '',
             hoverScale: $('#cHover').checked
           },
           layout: {
